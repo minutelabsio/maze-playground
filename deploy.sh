@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-REPO="flight-speed.git"
+REPO="LAB_REPO.git"
 
 # abort on errors
 set -e

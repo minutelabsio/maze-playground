@@ -1,12 +1,15 @@
 <template lang="pug">
 .home
-  p Hello world
+  Maze
 </template>
 
 <script>
+import Maze from '@/components/Maze'
+
 export default {
   name: 'Home'
   , components: {
+    Maze
   }
 }
 </script>
