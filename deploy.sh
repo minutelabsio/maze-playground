@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-REPO="LAB_REPO.git"
+REPO="maze-playground.git"
 
 # abort on errors
 set -e
