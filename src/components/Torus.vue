@@ -6,7 +6,7 @@
 <script>
 import { scaleLinear } from 'd3-scale'
 import _shuffle from 'lodash/shuffle'
-import _unionWith from 'lodash/unionWith'
+import _uniqWith from 'lodash/uniqWith'
 import _pull from 'lodash/pull'
 
 function drawCircle(ctx, x, y, r, color) {
@@ -68,13 +68,13 @@ function torusGrid(width, depth){
       return { x: x / width, y: y / depth }
     }
     , links(){
-      return grid.nodes.reduce((links, n) => {
-        return _unionWith(
-          links,
-          n.links.map(second => ({ first: n, second, id: connectionId(n, second) })),
-          (a, b) => a.id === b.id
-        )
-      }, [])
+      return _uniqWith(
+        grid.nodes.reduce((links, n) => {
+          links.push.apply(links, n.links.map(second => ({ first: n, second, id: connectionId(n, second) })))
+          return links
+        }, [])
+      , (a, b) => a.id === b.id
+      )
     }
   }
 
@@ -165,7 +165,7 @@ export default {
   }
   , data: () => ({
     mazeW: 60
-    , mazeD: 10
+    , mazeD: 40
     , center: [0, 0]
     , angle: 0
     , zoomExp: 2
