@@ -87,7 +87,10 @@ function torusGrid(width, depth){
         , grid.get(x - 1, y)
         , grid.get(x, y + 1)
         , grid.get(x, y - 1)
-      ].forEach(n => n && connect(node, n))
+      ].forEach(n => {
+        if (!n){ return }
+        connect(node, n)
+      })
       grid.nodes.push(node)
     }
   }
@@ -114,6 +117,39 @@ function recursiveBacktrack(grid){
   return out
 }
 
+export function lerp(min, max, v, clamp = false) {
+  if (clamp) {
+    if (v >= 1) {
+      return max
+    }
+    if (v <= 0) {
+      return min
+    }
+  }
+  return max * v + min * (1 - v)
+}
+
+function smoothProperties(props, onUpdate){
+  const ret = {}
+  const tick = () => {
+    window.requestAnimationFrame(tick)
+    for (let key in props){
+      let entry = props[key]
+      let get = entry.get || entry
+      let tightness = entry.tightness || 0.1
+      ret[key] = lerp(+ret[key] || 0, get(), tightness)
+    }
+    if (onUpdate){ onUpdate(ret) }
+  }
+
+  ret.destroy = () => {
+    window.cancelAnimationFrame(tick)
+  }
+
+  tick()
+
+  return ret
+}
 
 export default {
   name: 'Torus'
@@ -128,12 +164,37 @@ export default {
     }
   }
   , data: () => ({
-    center: [0, 0]
-    , zoomExp: 1
+    mazeW: 60
+    , mazeD: 10
+    , center: [0, 0]
+    , angle: 0
+    , zoomExp: 2
   })
   , mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
+
+    const $x = scaleLinear()
+    const $y = scaleLinear()
+
+    this.smooth = smoothProperties({
+      zoomExp: () => this.zoomExp
+      , angle: () => this.angle
+    }, smooth => {
+      smooth.zoom = Math.pow((this.mazeD + 1) / (Math.PI * 2), (smooth.zoomExp + 4) % 2 + 2)
+
+      let hw = this.width / 2
+      let ox = this.center[0] + hw
+      let dx = smooth.zoom * hw
+      smooth.$x = $x.range([ox - dx, ox + dx])
+
+      let hh = this.height / 2
+      let oy = this.center[1] + hh
+      let dy = smooth.zoom * hh
+      smooth.$y = $y.range([oy - dy, oy + dy])
+    })
+
     this.makeMaze()
+
     const draw = () => {
       window.requestAnimationFrame(draw)
       this.draw()
@@ -141,36 +202,41 @@ export default {
 
     this.$on('hooks:beforeDestroy', () => {
       window.cancelAnimationFrame(draw)
+      this.smooth.destroy()
     })
 
     draw()
   }
   , computed: {
-    xScale(){
-      let hw = this.width / 2
-      let ox = this.center[0] + hw
-      let dx = this.zoom * hw
+    // xScale(){
+    //   let hw = this.width / 2
+    //   let ox = this.center[0] + hw
+    //   let dx = this.zoomAnim * hw
 
-      return scaleLinear()
-        .range([ox - dx, ox + dx])
-    }
-    , yScale(){
-      let hh = this.height / 2
-      let oy = this.center[1] + hh
-      let dy = this.zoom * hh
+    //   return scaleLinear()
+    //     .range([ox - dx, ox + dx])
+    // }
+    // , yScale(){
+    //   let hh = this.height / 2
+    //   let oy = this.center[1] + hh
+    //   let dy = this.zoomAnim * hh
 
-      return scaleLinear()
-        .range([oy - dy, oy + dy])
-    }
-    , zoom(){
-      return Math.pow(2, (this.zoomExp - 4) % 2 + 2)
-    }
-    , trueZoom(){
-      return Math.pow(2, this.zoomExp)
-    }
+    //   return scaleLinear()
+    //     .range([oy - dy, oy + dy])
+    // }
+    // , zoom(){
+    //   return Math.pow((this.mazeD + 1) / (Math.PI * 2), (this.zoomExp + 4) % 2 + 2)
+    // }
+    // , trueZoom(){
+    //   return Math.pow((this.mazeD + 1) / (Math.PI * 2), this.zoomExp + 2)
+    // }
   }
   , methods: {
-    onWheel(e){
+    smoothAnim(){
+      this.zoomExpAnim = lerp(this.zoomExpAnim, this.zoomExp, 0.1)
+      this.zoomAnim = Math.pow((this.mazeD + 1) / (Math.PI * 2), (this.zoomExpAnim + 4) % 2 + 2)
+    }
+    , onWheel(e){
       this.zoomExp -= e.deltaY / 1000
     }
     , onDrag({ first, last, deltaX, deltaY }){
@@ -178,11 +244,12 @@ export default {
       if (first){ this.dragging = true }
       if (!this.dragging){ return }
       if (deltaX || deltaY){
-        this.center = [this.center[0] + deltaX, this.center[1] + deltaY]
+        // this.center = [this.center[0] + deltaX, this.center[1] + deltaY]
+        this.angle -= 2 * deltaX / this.width
       }
     }
     , makeMaze(){
-      this.maze = torusGrid(60, 10)
+      this.maze = torusGrid(this.mazeW, this.mazeD)
       this.maze.nodes = recursiveBacktrack(this.maze)
       this.mazeLinks = this.maze.links()
     }
@@ -193,30 +260,33 @@ export default {
       const dot = (x, y) => {
         drawCircle(ctx, x, y, 5, 'grey')
       }
-      const line = (one, two, z = 1) => {
-        let o = 1 - z * 0.2
-        drawLine(ctx, one, two, `rgba(0, 200, 200, ${o})`, 1)
+      const line = (one, two, o = 1) => {
+        drawLine(ctx, one, two, `rgba(200, 200, 0, ${o})`, 1)
       }
-      const $x = this.xScale
-      const $y = this.yScale
+      const $x = this.smooth.$x
+      const $y = this.smooth.$y
+      const da = Math.PI * 2 / this.maze.width
 
-      const $coords = (n) => {
+      const $coords = (n, z = 0) => {
         let p = this.maze.toNormalized(n.x, n.y)
         // let {x, y} = p
-        let alpha = p.x * Math.PI * 2
-        let r = (p.y + 1) / 2
+        let alpha = p.x * Math.PI * 2 + this.smooth.angle
+        // creates even radial grid
+        let r = Math.pow(1 - da, n.y + this.maze.depth * z)
         let x = (r * Math.cos(alpha) + 1) / 2
         let y = (r * Math.sin(alpha) + 1) / 2
         return {
           x: $x(x)
           , y: $y(y)
+          , r
         }
       }
 
-      const isOuter = (node) => {
-        return Math.abs(node.x) === Math.abs(node.y)
+      const isBridge = (link) => {
+        return Math.abs(link.first.y - link.second.y) > 1
       }
 
+      const o = this.smooth.zoom
       // create maze
       const draw = (nLayers) => {
         // for (let node of this.maze.nodes){
@@ -226,19 +296,14 @@ export default {
         //     dot(x, y)
         //   }
         // }
-
         this.mazeLinks.forEach(l => {
-
-          let first = $coords(l.first)
-          let second = $coords(l.second)
-          line(first, second)
-          // if (isXC){
-          //   second = scaleBy(second, 1)
-          // }
-
-          // for (let n = -1; n < nLayers; n++){
-          //   line($coords(scaleBy(first, n)), $coords(scaleBy(second, n)), zo + n)
-          // }
+          let m = isBridge(l) ? 1 : 0
+          for (let n = 0; n < nLayers; n++){
+            let first = $coords(l.first, n + m)
+            let second = $coords(l.second, n)
+            let z = (Math.min(first.r, second.r) * o - 0.01)
+            line(first, second, Math.sqrt(Math.max(z, 0)))
+          }
         })
       }
 

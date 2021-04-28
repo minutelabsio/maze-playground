@@ -109,7 +109,7 @@ export default {
 
     addEventListeners(el, POINTER_START_EVENTS, onPointerStart)
     addEventListeners(
-      document.documentElement,
+      window,
       POINTER_END_EVENTS,
       onPointerEnd
     )
@@ -122,7 +122,7 @@ export default {
 
   , unbind(el) {
     removeEventListeners(el, POINTER_START_EVENTS)
-    removeEventListeners(document.documentElement, POINTER_END_EVENTS)
+    removeEventListeners(window, POINTER_END_EVENTS)
     removeEventListeners(document.documentElement, POINTER_MOVE_EVENTS)
   }
 }
