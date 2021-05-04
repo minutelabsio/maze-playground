@@ -1,12 +1,23 @@
 <template lang="pug">
-.maze(tabindex="0", v-drag="onDrag", @wheel.passive="onWheel")
-  canvas(ref="canvas", :width="width", :height="height")
+.wrap
+  .container
+    .section
+      b-field(grouped)
+        b-field
+          b-button.btn-dark(@click="resetPosition") Reset Position
+        b-field
+          b-button.btn-dark(@click="makeMaze") Remake
+        b-field
+          b-button.btn-dark(@click="changePerspective") Change perspective
+  .maze(tabindex="0")
+    canvas(ref="canvas", :width="width", :height="height", v-drag="onDrag", @wheel.passive="onWheel")
 </template>
 
 <script>
 import { scaleLinear } from 'd3-scale'
 import _shuffle from 'lodash/shuffle'
 import _uniqWith from 'lodash/uniqWith'
+import _difference from 'lodash/difference'
 import _pull from 'lodash/pull'
 
 function drawCircle(ctx, x, y, r, color) {
@@ -64,17 +75,48 @@ function torusGrid(width, depth){
       let i = grid.getIndex(x, y, mod)
       return i >= 0 ? grid.nodes[i] : null
     }
+    , getAntiLinks(node){
+      return _difference(node.neighbours.map(n => n.node), node.links)
+    }
     , toNormalized(x, y){
       return { x: x / width, y: y / depth }
     }
     , links(){
       return _uniqWith(
         grid.nodes.reduce((links, n) => {
-          links.push.apply(links, n.links.map(second => ({ first: n, second, id: connectionId(n, second) })))
+          let l = n.links.map(second => ({ first: n, second, id: connectionId(n, second) }))
+          links.push.apply(links, l)
           return links
         }, [])
-      , (a, b) => a.id === b.id
+        , (a, b) => a.id === b.id
       )
+    }
+    , walls(){
+      let walls = grid.nodes.reduce((walls, n) => {
+        let w = grid.getAntiLinks(n).map(second => ({ first: n, second, id: connectionId(n, second) }))
+        walls.push.apply(walls, w)
+        return walls
+      }, [])
+
+      return _uniqWith(walls, (a, b) => a.id === b.id).map(w => {
+        let { first, second } = w
+        if (first.x === second.x){
+          let y = (second.y - first.y) > 1 ? second.y + 0.5 : first.y + 0.5
+          return {
+            first: { x: first.x - 0.5, y }
+            , second: { x: first.x + 0.5, y }
+          }
+        } else if (first.y === second.y){
+          let x = (second.x - first.x) > 1 ? second.x + 0.5 : first.x + 0.5
+          return {
+            first: { x, y: first.y - 0.5 }
+            , second: { x, y: first.y + 0.5 }
+          }
+        } else {
+          console.log(first, second)
+          throw new Error("Unreachable")
+        }
+      })
     }
   }
 
@@ -82,39 +124,50 @@ function torusGrid(width, depth){
     for (let x = 0; x < width; x++){
       let id = grid.nodes.length
       let node = makeNode(x, y, id)
-      ;[
-        grid.get(x + 1, y)
-        , grid.get(x - 1, y)
-        , grid.get(x, y + 1)
-        , grid.get(x, y - 1)
-      ].forEach(n => {
-        if (!n){ return }
-        connect(node, n)
-      })
       grid.nodes.push(node)
     }
   }
+
+  grid.nodes.forEach(node => {
+    let { x, y } = node
+    node.neighbours = [
+      grid.get(x + 1, y)
+      , grid.get(x - 1, y)
+      , grid.get(x, y + 1)
+      , grid.get(x, y - 1)
+    ].map(n => {
+      let wrapX = Math.abs(node.x - n.x) > 1 ? (n.x > node.x ? -1 : 1) : 0
+      let wrapY = Math.abs(node.y - n.y) > 1 ? (n.y > node.y ? -1 : 1) : 0
+      return {
+        node: n
+        , wrapX
+        , wrapY
+      }
+    })
+  })
 
   return grid
 }
 
 function recursiveBacktrack(grid){
-  const out = grid.nodes.map(n => makeNode(n.x, n.y, n.id))
   let visited = []
-  const carve = idx => {
-    let n = grid.nodes[idx]
-    visited.push(n)
-    let links = _shuffle(n.links)
-    for (let next of links){
+  let z = 0
+  const carve = node => {
+    node.z = z
+    visited.push(node)
+    let neighbours = _shuffle(node.neighbours)
+    for (let n of neighbours){
+      let next = n.node
       if (visited.indexOf(next) < 0){
-        let nextidx = grid.getIndex(next.x, next.y)
-        connect(out[idx], out[nextidx])
-        carve(nextidx)
+        z += n.wrapY
+        connect(node, next)
+        // keep track of the layer
+        carve(next)
       }
     }
   }
-  carve(0)
-  return out
+  carve(grid.nodes[0])
+  return grid.nodes
 }
 
 export function lerp(min, max, v, clamp = false) {
@@ -130,10 +183,11 @@ export function lerp(min, max, v, clamp = false) {
 }
 
 function smoothProperties(props, onUpdate){
+  const keys = Object.keys(props)
   const ret = {}
   const tick = () => {
     window.requestAnimationFrame(tick)
-    for (let key in props){
+    for (let key of keys){
       let entry = props[key]
       let get = entry.get || entry
       let tightness = entry.tightness || 0.1
@@ -142,9 +196,15 @@ function smoothProperties(props, onUpdate){
     if (onUpdate){ onUpdate(ret) }
   }
 
-  ret.destroy = () => {
+  ret.$destroy = () => {
     window.cancelAnimationFrame(tick)
   }
+
+  keys.forEach(k => {
+    let entry = props[k]
+    let get = entry.get || entry
+    ret[k] = get()
+  })
 
   tick()
 
@@ -156,41 +216,57 @@ export default {
   , props: {
     width: {
       type: Number
-      , default: 1200
+      , default: 900
     }
     , height: {
       type: Number
-      , default: 1200
+      , default: 900
     }
   }
   , data: () => ({
     mazeW: 60
-    , mazeD: 40
+    , mazeD: 10
     , center: [0, 0]
-    , angle: 0
-    , zoomExp: 2
+    , angle: Math.PI / 2
+    , skew: 1
+    , zoomExp: -0.1
   })
   , mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
 
     const $x = scaleLinear()
     const $y = scaleLinear()
+    const $xTrue = scaleLinear()
+    const $yTrue = scaleLinear()
+
+    // This is not 2 because... idk.
+    // it was jumping around when wrapping and i think
+    // it has something to do with the line width
+    const mod = this.mazeD / (Math.PI * 1.995)
 
     this.smooth = smoothProperties({
       zoomExp: () => this.zoomExp
       , angle: () => this.angle
     }, smooth => {
-      smooth.zoom = Math.pow((this.mazeD + 1) / (Math.PI * 2), (smooth.zoomExp + 4) % 2 + 2)
+      // let base = (this.mazeD + 1) // (Math.PI * 2)
+      smooth.zoomTrue = Math.pow(2, smooth.zoomExp)
+      smooth.zoom = Math.pow(2, (smooth.zoomExp % mod + mod) % mod + mod)
+
+      let skew = this.skew //1 + Math.cos(smooth.phi)
 
       let hw = this.width / 2
       let ox = this.center[0] + hw
-      let dx = smooth.zoom * hw
+      let dx = skew * smooth.zoom * hw
       smooth.$x = $x.range([ox - dx, ox + dx])
+      let dxTrue = skew * smooth.zoomTrue * hw
+      smooth.$xTrue = $xTrue.range([ox - dxTrue, ox + dxTrue])
 
       let hh = this.height / 2
       let oy = this.center[1] + hh
       let dy = smooth.zoom * hh
       smooth.$y = $y.range([oy - dy, oy + dy])
+      let dyTrue = smooth.zoomTrue * hh
+      smooth.$yTrue = $yTrue.range([oy - dyTrue, oy + dyTrue])
     })
 
     this.makeMaze()
@@ -202,7 +278,7 @@ export default {
 
     this.$on('hooks:beforeDestroy', () => {
       window.cancelAnimationFrame(draw)
-      this.smooth.destroy()
+      this.smooth.$destroy()
     })
 
     draw()
@@ -232,11 +308,7 @@ export default {
     // }
   }
   , methods: {
-    smoothAnim(){
-      this.zoomExpAnim = lerp(this.zoomExpAnim, this.zoomExp, 0.1)
-      this.zoomAnim = Math.pow((this.mazeD + 1) / (Math.PI * 2), (this.zoomExpAnim + 4) % 2 + 2)
-    }
-    , onWheel(e){
+    onWheel(e){
       this.zoomExp -= e.deltaY / 1000
     }
     , onDrag({ first, last, deltaX, deltaY }){
@@ -246,28 +318,48 @@ export default {
       if (deltaX || deltaY){
         // this.center = [this.center[0] + deltaX, this.center[1] + deltaY]
         this.angle -= 2 * deltaX / this.width
+        this.phi -= 2 * deltaY / this.height
       }
+    }
+    , changePerspective(){
+      if (this.center[1] === 0){
+        this.skew = 2
+        this.center[1] = -this.height/2
+      } else {
+        this.skew = 1
+        this.center[1] = 0
+      }
+    }
+    , resetPosition(){
+      this.angle = Math.PI / 2
+      this.zoomExp = -0.1
     }
     , makeMaze(){
       this.maze = torusGrid(this.mazeW, this.mazeD)
       this.maze.nodes = recursiveBacktrack(this.maze)
       this.mazeLinks = this.maze.links()
+      this.mazeWalls = this.maze.walls()
     }
     , draw(){
       if (!this.maze){ return }
       const ctx = this.ctx
       ctx.clearRect(0, 0, this.width, this.height)
-      const dot = (x, y) => {
-        drawCircle(ctx, x, y, 5, 'grey')
+      const dot = ({x, y}, color = 'grey') => {
+        drawCircle(ctx, x, y, 5, color)
       }
-      const line = (one, two, o = 1) => {
+      const drawPath = (one, two, o = 1) => {
+        drawLine(ctx, one, two, `rgba(200, 0, 0, ${o})`, 1)
+      }
+      const drawWall = (one, two, o = 1) => {
         drawLine(ctx, one, two, `rgba(200, 200, 0, ${o})`, 1)
       }
       const $x = this.smooth.$x
       const $y = this.smooth.$y
+      const $xTrue = this.smooth.$xTrue
+      const $yTrue = this.smooth.$yTrue
       const da = Math.PI * 2 / this.maze.width
 
-      const $coords = (n, z = 0) => {
+      const $coords = (n, z = 0, real = false) => {
         let p = this.maze.toNormalized(n.x, n.y)
         // let {x, y} = p
         let alpha = p.x * Math.PI * 2 + this.smooth.angle
@@ -276,8 +368,8 @@ export default {
         let x = (r * Math.cos(alpha) + 1) / 2
         let y = (r * Math.sin(alpha) + 1) / 2
         return {
-          x: $x(x)
-          , y: $y(y)
+          x: real ? $xTrue(x) : $x(x)
+          , y: real ? $yTrue(y) : $y(y)
           , r
         }
       }
@@ -289,25 +381,48 @@ export default {
       const o = this.smooth.zoom
       // create maze
       const draw = (nLayers) => {
-        // for (let node of this.maze.nodes){
-        //   let x = $x(node.x)
-        //   let y = $y(node.y)
-        //   if (node.links.length){
-        //     dot(x, y)
-        //   }
-        // }
-        this.mazeLinks.forEach(l => {
+        this.mazeWalls.forEach(l => {
           let m = isBridge(l) ? 1 : 0
           for (let n = 0; n < nLayers; n++){
             let first = $coords(l.first, n + m)
             let second = $coords(l.second, n)
             let z = (Math.min(first.r, second.r) * o - 0.01)
-            line(first, second, Math.sqrt(Math.max(z, 0)))
+            drawWall(first, second, Math.sqrt(Math.max(z, 0)))
           }
+        })
+        // this.mazeLinks.forEach(l => {
+        //   let m = isBridge(l) ? 1 : 0
+        //   for (let n = 0; n < nLayers; n++){
+        //     let first = $coords(l.first, n + m)
+        //     let second = $coords(l.second, n)
+        //     let z = (Math.min(first.r, second.r) * o - 0.01)
+        //     drawPath(first, second, Math.sqrt(Math.max(z, 0)))
+        //   }
+        // })
+        let start = this.maze.nodes[0]
+        let end = this.maze.nodes[this.maze.nodes.length - 1]
+        dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
+        dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
+      }
+
+      const drawFlat = () => {
+        const $coords = ({ x, y }) => ({ x: $xTrue(x), y: $yTrue(y) })
+        this.mazeWalls.forEach(l => {
+          if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
+          let first = $coords(l.first)
+          let second = $coords(l.second)
+          drawWall(first, second, 1)
+        })
+        this.mazeLinks.forEach(l => {
+          if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
+          let first = $coords(l.first)
+          let second = $coords(l.second)
+          drawPath(first, second, 1)
         })
       }
 
       draw(6)
+      // drawFlat()
     }
   }
 }
