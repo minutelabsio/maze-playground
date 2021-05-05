@@ -2,21 +2,43 @@
 .wrap
   .container
     .section
-      b-field(grouped)
-        b-field
-          b-button.btn-dark(@click="resetPosition") Reset Position
-        b-field
-          b-button.btn-dark(@click="makeMaze") Remake
-        b-field
-          b-button.btn-dark(@click="changePerspective") Change perspective
-  .maze(tabindex="0")
-    canvas(ref="canvas", :width="width", :height="height", v-drag="onDrag", @wheel.passive="onWheel")
+      .columns
+        .column
+          b-field(grouped)
+            b-field
+              b-button.btn-dark(@click="resetPosition") Reset Position
+            b-field
+              b-button.btn-dark(@click="makeMaze") Remake
+            b-field
+              b-button.btn-dark(@click="changePerspective") Change perspective
+        .column
+          b-field(label="Recursion Levels")
+            b-slider(:min="3", :max="50", :step="1" v-model="mazeD")
+  .maze(
+    ref="maze",
+    tabindex="0",
+    v-drag="onDrag",
+    @wheel.passive="onWheel"
+  )
+    canvas(ref="canvas", :width="width", :height="height")
 </template>
 
 <script>
+import _sample from 'lodash/sample'
 import { scaleLinear } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
 import { torusGrid, recursiveBacktrack } from '@/maze/maze'
+
+function shortestAngle(a, old){
+  let d = a - old
+  if (d > Math.PI){
+    return d - Math.PI * 2 + old
+  } else if (d < -Math.PI){
+    return d + Math.PI * 2 + old
+  } else {
+    return a
+  }
+}
 
 function drawCircle(ctx, x, y, r, color) {
   if (color !== ctx.fillStyle) {
@@ -58,6 +80,9 @@ export default {
     , skew: 1
     , zoomExp: -0.1
     , minR: 3
+    , nodeIndex: 0
+    , nodePos: [0, 0, 0]
+    , maze: null
   })
   , mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
@@ -67,12 +92,11 @@ export default {
     const $xTrue = scaleLinear()
     const $yTrue = scaleLinear()
 
-    const mod = Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
-
     this.smooth = smoother({
       zoomExp: () => this.zoomExp
       , angle: () => this.angle
     }, smooth => {
+      const mod = this.mod
       // let base = (this.mazeD + 1) // (Math.PI * 2)
       smooth.zoomTrue = Math.pow(2, smooth.zoomExp)
       smooth.zoom = Math.pow(2, (smooth.zoomExp % mod + mod) % mod - 2 * mod)
@@ -92,30 +116,102 @@ export default {
       smooth.$y = $y.range([oy - dy, oy + dy])
       let dyTrue = smooth.zoomTrue * hh
       smooth.$yTrue = $yTrue.range([oy - dyTrue, oy + dyTrue])
+
+      this.draw()
     })
 
     this.makeMaze()
 
-    const draw = () => {
-      window.requestAnimationFrame(draw)
-      this.draw()
+    // let visited = []
+    // let n = this.maze.nodes[0]
+    // const interval = setInterval(() => {
+    //   let choices = n.links.filter(n => visited.indexOf(n) < 0)
+    //   if (!choices.length){
+    //     choices = n.links
+    //     visited = []
+    //   }
+    //   n = _sample(choices)
+    //   let z = this.nodePos[2]
+    //   if (Math.abs(this.nodePos[1] - n.y) > 1){
+    //     z -= Math.sign(this.nodePos[1] - n.y)
+    //   }
+    //   this.nodePos = [n.x, n.y, z]
+    //   visited.push(n)
+    // }, 1000)
+
+    // const draw = () => {
+    //   window.requestAnimationFrame(draw)
+    //   this.draw()
+    // }
+
+    const onKey = e => {
+      switch (e.code){
+        case 'ArrowUp':
+          this.move(2)
+          break
+        case 'ArrowDown':
+          this.move(3)
+          break
+        case 'ArrowLeft':
+          this.move(0)
+          break
+        case 'ArrowRight':
+          this.move(1)
+          break
+      }
     }
 
-    this.$on('hooks:beforeDestroy', () => {
-      window.cancelAnimationFrame(draw)
+    window.addEventListener('keydown', onKey)
+
+    this.$on('hook:beforeDestroy', () => {
+      // window.cancelAnimationFrame(draw)
       this.smooth.$destroy()
+      window.removeEventListener('keydown', onKey)
+      // clearInterval(interval)
     })
 
-    draw()
+    // draw()
+  }
+  , watch: {
+    nodePos([x, y, z]){
+      const mod = Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
+      let p = this.maze.toNormalized(x, y)
+      this.angle = shortestAngle(-p.x * Math.PI * 2 + Math.PI / 2, this.angle)
+      this.zoomExp = (1 / this.mazeD - p.y + z) * mod
+    }
+    , nodeIndex(){
+      let n = this.node
+      let z = this.nodePos[2]
+      if (Math.abs(this.nodePos[1] - n.y) > 1){
+        z -= Math.sign(this.nodePos[1] - n.y)
+      }
+      this.nodePos = [n.x, n.y, z]
+    }
+    , mazeD: 'makeMaze'
   }
   , computed: {
     iterations(){
       let r = 2 * this.minR / this.width
-      return Math.ceil(Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
+      let its =  Math.ceil(Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
+      return Math.max(its, 4)
+    }
+    , node(){
+      if (!this.maze){ return }
+      return this.maze.nodes[this.nodeIndex]
+    }
+    , mod(){
+      return Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
     }
   }
   , methods: {
-    onWheel(e){
+    move(index){
+      if (!this.node){ return }
+      let n = this.node.neighbours[index].node
+      if (this.node.links.indexOf(n) < 0){ return }
+
+      this.nodeIndex = this.maze.getIndex(n.x, n.y)
+    }
+    , onWheel(e){
       this.zoomExp -= e.deltaY / 1000
     }
     , onDrag({ first, last, deltaX, deltaY }){
@@ -146,6 +242,7 @@ export default {
       recursiveBacktrack(this.maze)
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()
+      this.nodeIndex = 0
     }
     , draw(){
       if (!this.maze){ return }
@@ -214,8 +311,10 @@ export default {
         // })
         let start = this.maze.nodes[0]
         let end = this.maze.nodes[this.maze.nodes.length - 1]
+        let pos = this.nodePos
         dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
         dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
+        dot($coords({ x: pos[0], y: pos[1] }, -pos[2], true), 'white')
       }
 
       const drawFlat = () => {
