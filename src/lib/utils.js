@@ -1,3 +1,15 @@
+export function lerp(min, max, v, clamp = false) {
+  if (clamp) {
+    if (v >= 1) {
+      return max
+    }
+    if (v <= 0) {
+      return min
+    }
+  }
+  return max * v + min * (1 - v)
+}
+
 export function copyToClipboard( str ) {
   const el = document.createElement('textarea')
   el.value = str
