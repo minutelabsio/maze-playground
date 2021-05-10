@@ -11,6 +11,8 @@
               b-button.btn-dark(@click="makeMaze") Remake
             b-field
               b-button.btn-dark(@click="changePerspective") Change perspective
+            b-field
+              b-button.btn-dark(type="is-primary", @click="solve") Show Solution
         .column
           b-field(label="Recursion Levels")
             b-slider(:min="3", :max="50", :step="1" v-model="mazeD")
@@ -25,9 +27,11 @@
 
 <script>
 import _sample from 'lodash/sample'
+import _isEqual from 'lodash/isEqual'
+import _findIndex from 'lodash/findIndex'
 import { scaleLinear } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
-import { torusGrid, recursiveBacktrack } from '@/maze/maze'
+import { torusGrid, recursiveBacktrack, findSolution } from '@/maze/maze'
 
 function shortestAngle(a, old){
   let d = a - old
@@ -78,11 +82,13 @@ export default {
     , center: [0, 0]
     , angle: Math.PI / 2
     , skew: 1
-    , zoomExp: -0.1
+    , zoomExp: 0
     , minR: 3
-    , nodeIndex: 0
+    , nodeIndex: -1
     , nodePos: [0, 0, 0]
     , maze: null
+    , path: []
+    , sol: false
   })
   , mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
@@ -177,15 +183,25 @@ export default {
       const mod = Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
       let p = this.maze.toNormalized(x, y)
       this.angle = shortestAngle(-p.x * Math.PI * 2 + Math.PI / 2, this.angle)
-      this.zoomExp = (1 / this.mazeD - p.y + z) * mod
+      this.zoomExp = (1 / this.mazeD - p.y - z) * mod
     }
     , nodeIndex(){
       let n = this.node
       let z = this.nodePos[2]
       if (Math.abs(this.nodePos[1] - n.y) > 1){
-        z -= Math.sign(this.nodePos[1] - n.y)
+        z += Math.sign(this.nodePos[1] - n.y)
       }
       this.nodePos = [n.x, n.y, z]
+
+      let idx = _findIndex(this.path, n => _isEqual(this.nodePos, n))
+      if (idx >= 0){
+        this.path.splice(idx, this.path.length)
+      }
+      this.path.push(this.nodePos)
+
+      if (this.nodeIndex === this.maze.nodes.length - 1){
+        this.solve()
+      }
     }
     , mazeD: 'makeMaze'
   }
@@ -242,7 +258,10 @@ export default {
       recursiveBacktrack(this.maze)
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()
+      this.path = []
+      this.nodePos = [0, 0, 0]
       this.nodeIndex = 0
+      this.sol = false
     }
     , draw(){
       if (!this.maze){ return }
@@ -309,12 +328,36 @@ export default {
         //     drawPath(first, second, Math.sqrt(Math.max(z, 0)))
         //   }
         // })
+
         let start = this.maze.nodes[0]
+        let first = $coords(start, start.z, true)
         let end = this.maze.nodes[this.maze.nodes.length - 1]
         let pos = this.nodePos
+        // path
+        this.ctx.strokeStyle = 'rgba(200, 0, 0, 1)'
+        this.ctx.beginPath()
+        this.ctx.moveTo(first.x, first.y)
+        this.path.forEach(p => {
+          let n = $coords({ x: p[0], y: p[1] }, p[2], true)
+          this.ctx.lineTo(n.x, n.y)
+        })
+        this.ctx.stroke()
+        // sol
+        if (this.sol){
+          this.ctx.strokeStyle = 'rgba(0, 200, 0, 1)'
+          this.ctx.beginPath()
+          this.ctx.moveTo(first.x, first.y)
+          this.sol.forEach(p => {
+            let n = $coords(p, p.z, true)
+            this.ctx.lineTo(n.x, n.y)
+          })
+          this.ctx.stroke()
+        }
+
+        // dots
         dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
         dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
-        dot($coords({ x: pos[0], y: pos[1] }, -pos[2], true), 'white')
+        dot($coords({ x: pos[0], y: pos[1] }, pos[2], true), 'white')
       }
 
       const drawFlat = () => {
@@ -335,6 +378,9 @@ export default {
 
       draw(this.iterations)
       // drawFlat()
+    }
+    , solve(){
+      this.sol = findSolution(this.maze.nodes)
     }
   }
 }

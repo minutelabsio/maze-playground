@@ -22,22 +22,20 @@ export const connectionId = (first, second) => {
 
 export function recursiveBacktrack(grid) {
   let visited = []
-  let z = 0
-  const carve = node => {
+  const carve = (node, z) => {
     node.z = z
     visited.push(node)
     let neighbours = _shuffle(node.neighbours)
     for (let n of neighbours) {
       let next = n.node
       if (visited.indexOf(next) < 0) {
-        z += n.wrapY
         connect(node, next)
         // keep track of the layer
-        carve(next)
+        carve(next, z + n.wrapY)
       }
     }
   }
-  carve(grid.nodes[0])
+  carve(grid.nodes[0], 0)
 }
 
 export function torusGrid(width, depth) {
@@ -129,4 +127,20 @@ export function torusGrid(width, depth) {
   })
 
   return grid
+}
+
+export function findSolution(nodes, node, visited = []){
+  if (!node){ node = nodes[0] }
+  if (node === nodes[nodes.length - 1]){ return [node] }
+  for (let i = 0; i < node.links.length; i++){
+    let link = node.links[i]
+    if (visited.indexOf(link) >= 0){ continue }
+    visited.push(link)
+    let sol = findSolution(nodes, link, visited)
+    if (sol){
+      sol.unshift(link)
+      return sol
+    }
+  }
+  return false
 }
