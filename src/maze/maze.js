@@ -1,4 +1,5 @@
 import _shuffle from 'lodash/shuffle'
+import _sample from 'lodash/sample'
 import _uniqWith from 'lodash/uniqWith'
 import _difference from 'lodash/difference'
 import _pull from 'lodash/pull'
@@ -22,8 +23,7 @@ export const connectionId = (first, second) => {
 
 export function recursiveBacktrack(grid) {
   let visited = []
-  const carve = (node, z) => {
-    node.z = z
+  const carve = node => {
     visited.push(node)
     let neighbours = _shuffle(node.neighbours)
     for (let n of neighbours) {
@@ -31,11 +31,45 @@ export function recursiveBacktrack(grid) {
       if (visited.indexOf(next) < 0) {
         connect(node, next)
         // keep track of the layer
-        carve(next, z + n.wrapY)
+        next.z = node.z + n.wrapY
+        carve(next)
       }
     }
   }
-  carve(grid.nodes[0], 0)
+  // disconnect all
+  grid.nodes.forEach(n => n.links = [])
+  grid.nodes[0].z = 0
+  carve(grid.nodes[0])
+}
+
+export function depthFirst(grid) {
+  grid.nodes.forEach(n => {
+    n.links = []
+    n._visited = false
+  })
+  grid.nodes[0].z = 0
+
+  let remaining = grid.nodes.concat([])
+  let stack = []
+  let node = remaining.shift()
+  node._visited = true
+  stack.push(node)
+  while (remaining.length > 0){
+    let toVisit = node.neighbours.filter(n => !n.node._visited)
+    if (!toVisit.length){
+      node = stack.pop()
+      continue
+    }
+    let n = _sample(toVisit)
+    let next = n.node
+    connect(node, next)
+    // keep track of the layer
+    next.z = node.z + n.wrapY
+    node = next
+    node._visited = true
+    _pull(remaining, node)
+    stack.push(node)
+  }
 }
 
 export function torusGrid(width, depth) {

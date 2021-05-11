@@ -16,6 +16,11 @@
         .column
           b-field(label="Recursion Levels")
             b-slider(:min="3", :max="50", :step="1" v-model="mazeD")
+          //- b-field(label="Difficulty")
+          //-   b-select(v-model="difficulty")
+          //-     option(value="easy") Easy
+          //-     option(value="medium") Medium
+          //-     option(value="hard") Hard
   .maze(
     ref="maze",
     tabindex="0",
@@ -31,7 +36,7 @@ import _isEqual from 'lodash/isEqual'
 import _findIndex from 'lodash/findIndex'
 import { scaleLinear } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
-import { torusGrid, recursiveBacktrack, findSolution } from '@/maze/maze'
+import { torusGrid, recursiveBacktrack, depthFirst, findSolution } from '@/maze/maze'
 
 function shortestAngle(a, old){
   let d = a - old
@@ -89,6 +94,7 @@ export default {
     , maze: null
     , path: []
     , sol: false
+    , difficulty: 'easy'
   })
   , mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
@@ -253,9 +259,30 @@ export default {
       this.angle = Math.PI / 2
       this.zoomExp = -0.1
     }
+    , isAppropriateSolution(len){
+      // let n = this.mazeD * this.mazeW
+      // let ranges = [12, 8, 2, 1].map(b => Math.round(n / b))
+      // switch (this.difficulty){
+      //   case 'easy':
+      //     return len > ranges[0] && len < ranges[1]
+      //   case 'medium':
+      //     return len > ranges[1] && len < ranges[2]
+      //   case 'hard':
+      //     return len > ranges[2] && len < ranges[3]
+      // }
+      return len > 10
+    }
     , makeMaze(){
-      this.maze = torusGrid(this.mazeW, this.mazeD)
-      recursiveBacktrack(this.maze)
+      let maze = torusGrid(this.mazeW, this.mazeD)
+      let attempts = 10
+      while (attempts--) {
+        depthFirst(maze)
+        break
+        // let sol = findSolution(this.maze.nodes)
+        // if (this.isAppropriateSolution(sol.length)){ break }
+      }
+      if (attempts < 1){ console.log('maxed out attempts to produce difficult maze')}
+      this.maze = Object.freeze(maze)
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()
       this.path = []
@@ -380,7 +407,7 @@ export default {
       // drawFlat()
     }
     , solve(){
-      this.sol = findSolution(this.maze.nodes)
+      this.sol = Object.freeze(findSolution(this.maze.nodes))
     }
   }
 }
