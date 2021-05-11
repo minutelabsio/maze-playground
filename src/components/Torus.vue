@@ -36,7 +36,7 @@ import _isEqual from 'lodash/isEqual'
 import _findIndex from 'lodash/findIndex'
 import { scaleLinear } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
-import { torusGrid, recursiveBacktrack, depthFirst, findSolution } from '@/maze/maze'
+import { torusGrid, addConfoundingLoops, depthFirst, findSolution } from '@/maze/maze'
 
 function shortestAngle(a, old){
   let d = a - old
@@ -256,8 +256,9 @@ export default {
       }
     }
     , resetPosition(){
-      this.angle = Math.PI / 2
-      this.zoomExp = -0.1
+      // this.angle = Math.PI / 2
+      // this.zoomExp = -0.1
+      this.nodeIndex = 0
     }
     , isAppropriateSolution(len){
       // let n = this.mazeD * this.mazeW
@@ -282,6 +283,10 @@ export default {
         // if (this.isAppropriateSolution(sol.length)){ break }
       }
       if (attempts < 1){ console.log('maxed out attempts to produce difficult maze')}
+      const holes = Math.round(Math.sqrt(maze.nodes.length) / 4)
+      // console.log('holes', holes)
+      maze.solution = findSolution(maze.nodes)
+      addConfoundingLoops(maze, holes)
       this.maze = Object.freeze(maze)
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()
@@ -331,8 +336,17 @@ export default {
       const o = this.smooth.zoom
       // create maze
       const draw = (nLayers) => {
+        const [cx, cy] = [this.width / 2 + this.center[0], this.height / 2 + this.center[1]]
+        let radGrad = ctx.createRadialGradient(
+          cx, cy, 1,
+          cx, cy, this.width / 3
+        )
+        radGrad.addColorStop(0, 'rgba(200, 200, 0, 0.1)')
+        radGrad.addColorStop(1, 'rgba(200, 200, 0, 1)')
+        this.ctx.strokeStyle = radGrad
+
         this.ctx.lineWidth = 1
-        this.ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
+        // this.ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
         this.ctx.beginPath()
         this.mazeWalls.forEach(l => {
           let m = isBridge(l) ? 1 : 0
@@ -407,7 +421,7 @@ export default {
       // drawFlat()
     }
     , solve(){
-      this.sol = Object.freeze(findSolution(this.maze.nodes))
+      this.sol = Object.freeze(this.maze.solution)
     }
   }
 }

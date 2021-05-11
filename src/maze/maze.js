@@ -1,5 +1,7 @@
 import _shuffle from 'lodash/shuffle'
+import _flatten from 'lodash/flatten'
 import _sample from 'lodash/sample'
+import _sampleSize from 'lodash/sampleSize'
 import _uniqWith from 'lodash/uniqWith'
 import _difference from 'lodash/difference'
 import _pull from 'lodash/pull'
@@ -177,4 +179,19 @@ export function findSolution(nodes, node, visited = []){
     }
   }
   return false
+}
+
+export function addConfoundingLoops(maze, count = 3){
+  let pairs = maze.nodes.reduce((acc, n) => {
+    if (n.links.length > 1){ return acc }
+    let pairs = n.neighbours
+      .filter(g => n.z !== g.node.z)
+      .map(g => [n, g.node])
+    acc.push.apply(acc, pairs)
+    return acc
+  }, [])
+
+  _sampleSize(pairs, count).forEach(([first, second]) => {
+    connect(first, second)
+  })
 }
