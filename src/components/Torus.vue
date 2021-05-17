@@ -13,6 +13,9 @@
               b-button.btn-dark(@click="changePerspective") Change perspective
             b-field
               b-button.btn-dark(type="is-primary", @click="solve") Show Solution
+          b-field(grouped)
+            b-field(label="Follow Zoom")
+              b-switch(v-model="followZoom")
         .column
           b-field(label="Recursion Levels")
             b-slider(:min="3", :max="50", :step="1" v-model="mazeD")
@@ -89,12 +92,14 @@ export default {
     , skew: 1
     , zoomExp: 0
     , minR: 3
-    , nodeIndex: -1
+    , nodeIndex: [-1, 0]
     , nodePos: [0, 0, 0]
     , maze: null
     , path: []
     , sol: false
+    , solved: false
     , difficulty: 'easy'
+    , followZoom: true
   })
   , mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
@@ -105,11 +110,12 @@ export default {
     const $yTrue = scaleLinear()
 
     this.smooth = smoother({
-      zoomExp: () => this.zoomExp
-      , angle: () => this.angle
+      zoomExp: { get: () => this.zoomExp, tightness : 0.05 }
+      , angle: { get: () => this.angle, tightness: 0.05 }
     }, smooth => {
       const mod = this.mod
       // let base = (this.mazeD + 1) // (Math.PI * 2)
+      const fudge = -1
       smooth.zoomTrue = Math.pow(2, smooth.zoomExp)
       smooth.zoom = Math.pow(2, (smooth.zoomExp % mod + mod) % mod - 2 * mod)
 
@@ -158,17 +164,21 @@ export default {
 
     const onKey = e => {
       switch (e.code){
+        case 'KeyW':
         case 'ArrowUp':
-          this.move(2)
+          while(this.move(2) === 2){ 0 }
           break
+        case 'KeyS':
         case 'ArrowDown':
-          this.move(3)
+          while(this.move(3) === 2){ 0 }
           break
+        case 'KeyA':
         case 'ArrowLeft':
-          this.move(0)
+          while(this.move(0) === 2){ 0 }
           break
+        case 'KeyD':
         case 'ArrowRight':
-          this.move(1)
+          while(this.move(1) === 2){ 0 }
           break
       }
     }
@@ -185,41 +195,17 @@ export default {
     // draw()
   }
   , watch: {
-    nodePos([x, y, z]){
-      const mod = Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
-      let p = this.maze.toNormalized(x, y)
-      this.angle = shortestAngle(-p.x * Math.PI * 2 + Math.PI / 2, this.angle)
-      this.zoomExp = (1 / this.mazeD - p.y - z) * mod
-    }
-    , nodeIndex(){
-      let n = this.node
-      let z = this.nodePos[2]
-      if (Math.abs(this.nodePos[1] - n.y) > 1){
-        z += Math.sign(this.nodePos[1] - n.y)
-      }
-      this.nodePos = [n.x, n.y, z]
-
-      let idx = _findIndex(this.path, n => _isEqual(this.nodePos, n))
-      if (idx >= 0){
-        this.path.splice(idx, this.path.length)
-      }
-      this.path.push(this.nodePos)
-
-      if (this.nodeIndex === this.maze.nodes.length - 1){
-        this.solve()
-      }
-    }
-    , mazeD: 'makeMaze'
+    iterations: 'makeMaze'
   }
   , computed: {
     iterations(){
       let r = 2 * this.minR / this.width
-      let its =  Math.ceil(Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
-      return Math.max(its, 4)
+      let its = Math.ceil(1.5 * Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
+      return Math.max(its, 6)
     }
     , node(){
       if (!this.maze){ return }
-      return this.maze.nodes[this.nodeIndex]
+      return this.maze.nodes[this.nodeIndex[0]]
     }
     , mod(){
       return Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
@@ -227,11 +213,41 @@ export default {
   }
   , methods: {
     move(index){
-      if (!this.node){ return }
-      let n = this.node.neighbours[index].node
-      if (this.node.links.indexOf(n) < 0){ return }
+      if (!this.node){ return false }
+      let z = this.nodeIndex[1]
 
-      this.nodeIndex = this.maze.getIndex(n.x, n.y)
+      let n = this.node.neighbours[index]
+      if (this.node.links.indexOf(n.node) < 0){ return false }
+
+      this.setNode(this.maze.getIndex(n.node.x, n.node.y), z + n.wrapY)
+      return this.node.links.length
+    }
+    , setNode(index, z){
+      this.nodeIndex = [index, z]
+      let n = this.maze.nodes[index]
+      this.nodePos = [n.x, n.y, z]
+
+      // move perspective
+      if (!this.dragging){
+        const mod = this.mod
+        let p = this.maze.toNormalized(n.x, n.y)
+        this.angle = shortestAngle(-p.x * Math.PI * 2 + Math.PI / 2, this.angle)
+        if (this.followZoom){
+          this.zoomExp = (1 / this.mazeD - p.y - z) * mod + this.skew - 2
+        }
+      }
+
+      // update path
+      let idx = _findIndex(this.path, n => _isEqual(this.nodePos, n))
+      if (idx >= 0){
+        this.path.splice(idx, this.path.length)
+      }
+      this.path.push(this.nodePos)
+
+      let l = this.maze.nodes.length
+      if (this.nodeIndex[0] === l - 1 && this.maze.nodes[l - 1].z === this.nodeIndex[1]){
+        this.solved = true
+      }
     }
     , onWheel(e){
       this.zoomExp -= e.deltaY / 1000
@@ -249,7 +265,7 @@ export default {
     , changePerspective(){
       if (this.center[1] === 0){
         this.skew = 2
-        this.center[1] = -this.height/2
+        this.center[1] = -this.height / 2
       } else {
         this.skew = 1
         this.center[1] = 0
@@ -258,7 +274,8 @@ export default {
     , resetPosition(){
       // this.angle = Math.PI / 2
       // this.zoomExp = -0.1
-      this.nodeIndex = 0
+      this.setNode(0, 0)
+      this.solved = false
     }
     , isAppropriateSolution(len){
       // let n = this.mazeD * this.mazeW
@@ -271,16 +288,15 @@ export default {
       //   case 'hard':
       //     return len > ranges[2] && len < ranges[3]
       // }
-      return len > 10
+      return len > 30
     }
     , makeMaze(){
       let maze = torusGrid(this.mazeW, this.mazeD)
       let attempts = 10
       while (attempts--) {
         depthFirst(maze)
-        break
-        // let sol = findSolution(this.maze.nodes)
-        // if (this.isAppropriateSolution(sol.length)){ break }
+        let sol = findSolution(maze.nodes)
+        if (this.isAppropriateSolution(sol.length)){ break }
       }
       if (attempts < 1){ console.log('maxed out attempts to produce difficult maze')}
       const holes = Math.round(Math.sqrt(maze.nodes.length) / 4)
@@ -291,8 +307,7 @@ export default {
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()
       this.path = []
-      this.nodePos = [0, 0, 0]
-      this.nodeIndex = 0
+      this.resetPosition()
       this.sol = false
     }
     , draw(){
@@ -333,7 +348,7 @@ export default {
         return Math.abs(link.first.y - link.second.y) > 1
       }
 
-      const o = this.smooth.zoom
+      const zoom = this.smooth.zoom
       // create maze
       const draw = (nLayers) => {
         const [cx, cy] = [this.width / 2 + this.center[0], this.height / 2 + this.center[1]]
@@ -350,7 +365,7 @@ export default {
         this.ctx.beginPath()
         this.mazeWalls.forEach(l => {
           let m = isBridge(l) ? 1 : 0
-          for (let n = 0; n < nLayers; n++){
+          for (let n = -1; n < nLayers; n++){
             let first = $coords(l.first, n + m)
             let second = $coords(l.second, n)
             // let z = (Math.min(first.r, second.r) * o - 0.01)
@@ -375,7 +390,7 @@ export default {
         let end = this.maze.nodes[this.maze.nodes.length - 1]
         let pos = this.nodePos
         // path
-        this.ctx.strokeStyle = 'rgba(200, 0, 0, 1)'
+        this.ctx.strokeStyle = this.solved ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)'
         this.ctx.beginPath()
         this.ctx.moveTo(first.x, first.y)
         this.path.forEach(p => {

@@ -1,5 +1,4 @@
 import _shuffle from 'lodash/shuffle'
-import _flatten from 'lodash/flatten'
 import _sample from 'lodash/sample'
 import _sampleSize from 'lodash/sampleSize'
 import _uniqWith from 'lodash/uniqWith'
@@ -49,7 +48,9 @@ export function depthFirst(grid) {
     n.links = []
     n._visited = false
   })
-  grid.nodes[0].z = 0
+
+  const first = grid.nodes[0]
+  first.z = 0
 
   let remaining = grid.nodes.concat([])
   let stack = []
@@ -62,7 +63,8 @@ export function depthFirst(grid) {
       node = stack.pop()
       continue
     }
-    let n = _sample(toVisit)
+    // on the starting node, move away from the end node
+    let n = node === first ? toVisit[0] : _sample(toVisit)
     let next = n.node
     connect(node, next)
     // keep track of the layer
@@ -74,7 +76,7 @@ export function depthFirst(grid) {
   }
 }
 
-export function torusGrid(width, depth) {
+export function torusGrid(width, depth, twist = 0) {
   const grid = {
     nodes: []
     , width
@@ -146,11 +148,13 @@ export function torusGrid(width, depth) {
 
   grid.nodes.forEach(node => {
     let { x, y } = node
+    let d1 = (y === 0) ? twist : 0
+    let d2 = (y === depth - 1) ? twist : 0
     node.neighbours = [
       grid.get(x + 1, y)
       , grid.get(x - 1, y)
-      , grid.get(x, y + 1)
-      , grid.get(x, y - 1)
+      , grid.get(x + d2, y + 1)
+      , grid.get(x - d1, y - 1)
     ].map(n => {
       let wrapX = Math.abs(node.x - n.x) > 1 ? (n.x > node.x ? -1 : 1) : 0
       let wrapY = Math.abs(node.y - n.y) > 1 ? (n.y > node.y ? -1 : 1) : 0
@@ -168,7 +172,7 @@ export function torusGrid(width, depth) {
 export function findSolution(nodes, node, visited = []){
   if (!node){ node = nodes[0] }
   if (node === nodes[nodes.length - 1]){ return [node] }
-  for (let i = 0; i < node.links.length; i++){
+  for (let i = 0; i <  node.links.length; i++){
     let link = node.links[i]
     if (visited.indexOf(link) >= 0){ continue }
     visited.push(link)
