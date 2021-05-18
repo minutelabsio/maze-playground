@@ -152,8 +152,8 @@ export function torusGrid(width, depth, twist = 0) {
     let d2 = (y === depth - 1) ? twist : 0
     node.neighbours = [
       grid.get(x + 1, y)
-      , grid.get(x - 1, y)
       , grid.get(x + d2, y + 1)
+      , grid.get(x - 1, y)
       , grid.get(x - d1, y - 1)
     ].map(n => {
       let wrapX = Math.abs(node.x - n.x) > 1 ? (n.x > node.x ? -1 : 1) : 0

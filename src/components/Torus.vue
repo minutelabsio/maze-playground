@@ -37,6 +37,7 @@
 </template>
 
 <script>
+import _sampleSize from 'lodash/sampleSize'
 import _isEqual from 'lodash/isEqual'
 import _findIndex from 'lodash/findIndex'
 import Resizer from '@/components/Resizer'
@@ -49,6 +50,26 @@ const solutionColor = 'rgb(0, 200, 0)'
 const pathColor = 'rgb(62, 66, 230)'
 const centerOpacityForDensity = scaleLog().domain([200, .1])
 const wallScale = scaleLinear().domain([100, 10]).range([1, 2])
+
+const loadImage = (url) => {
+  let img = new Image()
+  img.src = url
+  return img
+}
+
+const Logo = loadImage(require('@/assets/logo-dark.png'))
+const Landmarks = [
+  require('@/assets/alex.png')
+  , require('@/assets/arcadi.png')
+  , require('@/assets/david.png')
+  , require('@/assets/ever.png')
+  , require('@/assets/henry.png')
+  , require('@/assets/jasper.png')
+  , require('@/assets/kate.png')
+  , require('@/assets/melissa.png')
+  , require('@/assets/peter.png')
+  , require('@/assets/sarah.png')
+].map(loadImage)
 
 function shortestAngle(a, old){
   let d = (a - old) % (Math.PI * 2)
@@ -140,7 +161,7 @@ export default {
       switch (e.code){
         case 'KeyW':
         case 'ArrowUp':
-          while(this.move(2)){ 0 }
+          while(this.move(1)){ 0 }
           break
         case 'KeyS':
         case 'ArrowDown':
@@ -152,7 +173,7 @@ export default {
           break
         case 'KeyD':
         case 'ArrowRight':
-          while(this.move(1)){ 0 }
+          while(this.move(2)){ 0 }
           break
       }
     }
@@ -289,9 +310,33 @@ export default {
       this.maze = Object.freeze(maze)
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()
+      this.makeLandmarks()
       this.path = []
       this.resetPosition()
       this.sol = false
+    }
+    , makeLandmarks(){
+      const locations = this.maze.nodes.filter(n => n.links.length === 1)
+      const nLandmarks = Math.min(Landmarks.length, locations.length)
+      const deadEnds = _sampleSize(locations, nLandmarks)
+      this.landmarks = _sampleSize(Landmarks, nLandmarks).map((img, i) => {
+        const n = deadEnds[i % locations.length]
+        const angle = 0 // Math.PI / 2 * (_findIndex(n.neighbours, { node: n.links[0] }, 'node') + 1)
+        let z = Math.ceil(Math.random() * 5) - 2
+        if (!z && !n.x && !n.y){ z += 1 }
+        return {
+          pos: n
+          , img
+          , angle
+          , z
+        }
+      })
+      this.landmarks.push({
+        pos: this.maze.nodes[0]
+        , img: Logo
+        , angle: 0
+        , z: 0
+      })
     }
     , draw(){
       if (!this.maze){ return }
@@ -380,7 +425,8 @@ export default {
         radGrad.addColorStop(0, `hsl(${wallHSL}, ${co})`)
         radGrad.addColorStop(1, `hsl(${wallHSL}, 1)`)
         ctx.strokeStyle = radGrad
-
+        ctx.shadowBlur = 8 * this.pixelRatio
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)'
         ctx.lineWidth = wallWidth
         ctx.lineCap = 'square'
         // ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
@@ -405,6 +451,26 @@ export default {
         ctx.stroke()
       }
 
+      const drawLandmarks = () => this.landmarks.forEach(({ img, pos, z, angle }) => {
+        let p = $coords(pos, z, true)
+        let hw = img.width / 2
+        let hh = img.height / 2
+        let r = $xTrue(p.r * da / 2) - $xTrue(0)
+        if (!hw || r < 6 || !isInCanvas(p)){ return }
+        let a = p.alpha - Math.PI / 2 + angle
+        const scale = 0.7 * (r) / img.height
+        ctx.shadowBlur = 4 * this.pixelRatio
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.6)'
+        ctx.translate(p.x, p.y)
+        ctx.rotate(a)
+        ctx.scale(scale, scale)
+        ctx.drawImage(img, -hw, -hh)
+        ctx.scale(1 / scale, 1 / scale)
+        ctx.rotate(-a)
+        ctx.translate(-p.x, -p.y)
+        ctx.shadowBlur = 0
+      })
+
       // const drawFlat = () => {
       //   const $coords = ({ x, y }) => ({ x: $xTrue(x), y: $yTrue(y) })
       //   this.mazeWalls.forEach(l => {
@@ -422,6 +488,7 @@ export default {
       // }
 
       drawWalls(this.iterations)
+      drawLandmarks()
 
       let start = this.maze.nodes[0]
       let end = this.maze.nodes[this.maze.nodes.length - 1]
@@ -433,7 +500,7 @@ export default {
       }
 
       // dots
-      dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
+      // dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
       dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
       dot($coords(pos, pos.z, true), 'white')
     }
