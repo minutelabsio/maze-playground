@@ -9,14 +9,16 @@
               b-button.btn-dark(@click="resetPosition") Reset Position
             b-field
               b-button.btn-dark(@click="makeMaze") Remake
-            b-field
-              b-button.btn-dark(@click="changePerspective") Change perspective
+            //- b-field
+            //-   b-button.btn-dark(@click="changePerspective") Change perspective
             b-field
               b-button.btn-dark(type="is-primary", @click="solve") Show Solution
           b-field(grouped)
             b-field(label="Follow Zoom")
               b-switch(v-model="followZoom")
         .column
+          b-field(label="Spokes")
+            b-slider(:min="10", :max="100", :step="1" v-model="mazeW")
           b-field(label="Recursion Levels")
             b-slider(:min="3", :max="50", :step="1" v-model="mazeD")
           //- b-field(label="Difficulty")
@@ -37,9 +39,12 @@
 import _sample from 'lodash/sample'
 import _isEqual from 'lodash/isEqual'
 import _findIndex from 'lodash/findIndex'
-import { scaleLinear } from 'd3-scale'
+import { scaleLinear, scaleLog } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
 import { torusGrid, addConfoundingLoops, depthFirst, findSolution } from '@/maze/maze'
+
+
+const centerOpacityForDensity = scaleLog().domain([100, 10])
 
 function shortestAngle(a, old){
   let d = a - old
@@ -77,7 +82,7 @@ export default {
   , props: {
     width: {
       type: Number
-      , default: 900
+      , default: 1600
     }
     , height: {
       type: Number
@@ -85,7 +90,7 @@ export default {
     }
   }
   , data: () => ({
-    mazeW: 72
+    mazeW: 20
     , mazeD: 3
     , center: [0, 0]
     , angle: Math.PI / 2
@@ -115,24 +120,24 @@ export default {
     }, smooth => {
       const mod = this.mod
       // let base = (this.mazeD + 1) // (Math.PI * 2)
-      const fudge = -1
       smooth.zoomTrue = Math.pow(2, smooth.zoomExp)
       smooth.zoom = Math.pow(2, (smooth.zoomExp % mod + mod) % mod - 2 * mod)
 
       let skew = this.skew //1 + Math.cos(smooth.phi)
 
+      let half = Math.min(this.width, this.height) / 2
       let hw = this.width / 2
       let ox = this.center[0] + hw
-      let dx = skew * smooth.zoom * hw
+      let dx = skew * smooth.zoom * half
       smooth.$x = $x.range([ox - dx, ox + dx])
-      let dxTrue = skew * smooth.zoomTrue * hw
+      let dxTrue = skew * smooth.zoomTrue * half
       smooth.$xTrue = $xTrue.range([ox - dxTrue, ox + dxTrue])
 
       let hh = this.height / 2
       let oy = this.center[1] + hh
-      let dy = smooth.zoom * hh
+      let dy = smooth.zoom * half
       smooth.$y = $y.range([oy - dy, oy + dy])
-      let dyTrue = smooth.zoomTrue * hh
+      let dyTrue = smooth.zoomTrue * half
       smooth.$yTrue = $yTrue.range([oy - dyTrue, oy + dyTrue])
 
       this.draw()
@@ -140,45 +145,23 @@ export default {
 
     this.makeMaze()
 
-    // let visited = []
-    // let n = this.maze.nodes[0]
-    // const interval = setInterval(() => {
-    //   let choices = n.links.filter(n => visited.indexOf(n) < 0)
-    //   if (!choices.length){
-    //     choices = n.links
-    //     visited = []
-    //   }
-    //   n = _sample(choices)
-    //   let z = this.nodePos[2]
-    //   if (Math.abs(this.nodePos[1] - n.y) > 1){
-    //     z -= Math.sign(this.nodePos[1] - n.y)
-    //   }
-    //   this.nodePos = [n.x, n.y, z]
-    //   visited.push(n)
-    // }, 1000)
-
-    // const draw = () => {
-    //   window.requestAnimationFrame(draw)
-    //   this.draw()
-    // }
-
     const onKey = e => {
       switch (e.code){
         case 'KeyW':
         case 'ArrowUp':
-          while(this.move(2) === 2){ 0 }
+          while(this.move(2)){ 0 }
           break
         case 'KeyS':
         case 'ArrowDown':
-          while(this.move(3) === 2){ 0 }
+          while(this.move(3)){ 0 }
           break
         case 'KeyA':
         case 'ArrowLeft':
-          while(this.move(0) === 2){ 0 }
+          while(this.move(0)){ 0 }
           break
         case 'KeyD':
         case 'ArrowRight':
-          while(this.move(1) === 2){ 0 }
+          while(this.move(1)){ 0 }
           break
       }
     }
@@ -186,16 +169,13 @@ export default {
     window.addEventListener('keydown', onKey)
 
     this.$on('hook:beforeDestroy', () => {
-      // window.cancelAnimationFrame(draw)
       this.smooth.$destroy()
       window.removeEventListener('keydown', onKey)
-      // clearInterval(interval)
     })
-
-    // draw()
   }
   , watch: {
-    iterations: 'makeMaze'
+    mazeW: 'makeMaze'
+    , mazeD: 'makeMaze'
   }
   , computed: {
     iterations(){
@@ -210,6 +190,9 @@ export default {
     , mod(){
       return Math.log2(Math.pow(1 - Math.PI * 2 / this.mazeW, this.mazeD))
     }
+    , centerOpacity(){
+      return centerOpacityForDensity(this.mazeW)
+    }
   }
   , methods: {
     move(index){
@@ -220,20 +203,20 @@ export default {
       if (this.node.links.indexOf(n.node) < 0){ return false }
 
       this.setNode(this.maze.getIndex(n.node.x, n.node.y), z + n.wrapY)
-      return this.node.links.length
+      return this.node.links.length === 2 && this.node !== this.maze.nodes[this.maze.nodes - 1]
     }
     , setNode(index, z){
       this.nodeIndex = [index, z]
-      let n = this.maze.nodes[index]
-      this.nodePos = [n.x, n.y, z]
+      let {x, y} = this.maze.nodes[index]
+      this.nodePos = {x, y, z}
 
       // move perspective
       if (!this.dragging){
         const mod = this.mod
-        let p = this.maze.toNormalized(n.x, n.y)
+        let p = this.maze.toNormalized(x, y)
         this.angle = shortestAngle(-p.x * Math.PI * 2 + Math.PI / 2, this.angle)
         if (this.followZoom){
-          this.zoomExp = (1 / this.mazeD - p.y - z) * mod + this.skew - 2
+          this.zoomExp = (1 / this.mazeD - p.y - z) * mod + (this.skew === 1 ? -1 : 0)
         }
       }
 
@@ -314,15 +297,7 @@ export default {
       if (!this.maze){ return }
       const ctx = this.ctx
       ctx.clearRect(0, 0, this.width, this.height)
-      const dot = ({x, y}, color = 'grey') => {
-        drawCircle(ctx, x, y, 5, color)
-      }
-      const drawPath = (one, two, o = 1) => {
-        drawLine(ctx, one, two, `rgba(200, 0, 0, ${o})`, 1)
-      }
-      const drawWall = (one, two, o = 1) => {
-        drawLine(ctx, one, two, `rgba(200, 200, 0, ${o})`, 1)
-      }
+
       const $x = this.smooth.$x
       const $y = this.smooth.$y
       const $xTrue = this.smooth.$xTrue
@@ -340,15 +315,54 @@ export default {
         return {
           x: real ? $xTrue(x) : $x(x)
           , y: real ? $yTrue(y) : $y(y)
+          , ox: x
+          , oy: y
           , r
+          , alpha
         }
+      }
+
+      const dot = ({x, y}, color = 'grey') => {
+        drawCircle(ctx, x, y, 5, color)
+      }
+
+      const arcBetween = (first, second, real = false) => {
+        let $sx = real ? $xTrue : $x
+        let $sy = real ? $yTrue : $y
+        // overly complicated way of drawing an arc...
+        // angle of control point between each point
+        let a = (first.alpha + second.alpha) / 2
+        // distance of control point from center
+        let r = first.r / Math.cos((second.alpha - first.alpha) / 2)
+        // convert to cartesian
+        let x = (r * Math.cos(a) + 1) / 2
+        let y = (r * Math.sin(a) + 1) / 2
+        let arcR = ($sy(first.r) - $sy(0)) / 2
+        ctx.arcTo($sx(x), $sy(y), second.x, second.y, arcR)
       }
 
       const isBridge = (link) => {
         return Math.abs(link.first.y - link.second.y) > 1
       }
 
-      const zoom = this.smooth.zoom
+      const drawPath = (start, path, color) => {
+        let first = $coords(start, start.z, true)
+        ctx.strokeStyle = color
+        ctx.beginPath()
+        ctx.moveTo(first.x, first.y)
+        path.reduce(([l, last], p) => {
+          let n = $coords(p, p.z, true)
+          if (l.y === p.y){
+            arcBetween(last, n, true)
+          } else {
+            ctx.lineTo(n.x, n.y)
+          }
+          return [p, n]
+        }, [start, first])
+        ctx.stroke()
+      }
+
+      const co = this.centerOpacity
       // create maze
       const draw = (nLayers) => {
         const [cx, cy] = [this.width / 2 + this.center[0], this.height / 2 + this.center[1]]
@@ -356,25 +370,29 @@ export default {
           cx, cy, 1,
           cx, cy, this.width / 3
         )
-        radGrad.addColorStop(0, 'rgba(200, 200, 0, 0.1)')
+        radGrad.addColorStop(0, `rgba(200, 200, 0, ${co})`)
         radGrad.addColorStop(1, 'rgba(200, 200, 0, 1)')
-        this.ctx.strokeStyle = radGrad
+        ctx.strokeStyle = radGrad
 
-        this.ctx.lineWidth = 1
-        // this.ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
-        this.ctx.beginPath()
+        ctx.lineWidth = 1
+        // ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
+        ctx.beginPath()
         this.mazeWalls.forEach(l => {
           let m = isBridge(l) ? 1 : 0
-          for (let n = -1; n < nLayers; n++){
+          for (let n = -2; n < nLayers; n++){
             let first = $coords(l.first, n + m)
             let second = $coords(l.second, n)
             // let z = (Math.min(first.r, second.r) * o - 0.01)
             // drawWall(first, second, Math.sqrt(Math.max(z, 0)))
-            this.ctx.moveTo(first.x, first.y)
-            this.ctx.lineTo(second.x, second.y)
+            ctx.moveTo(first.x, first.y)
+            if (l.first.y === l.second.y){
+              arcBetween(first, second)
+            } else {
+              ctx.lineTo(second.x, second.y)
+            }
           }
         })
-        this.ctx.stroke()
+        ctx.stroke()
         // this.mazeLinks.forEach(l => {
         //   let m = isBridge(l) ? 1 : 0
         //   for (let n = 0; n < nLayers; n++){
@@ -386,34 +404,18 @@ export default {
         // })
 
         let start = this.maze.nodes[0]
-        let first = $coords(start, start.z, true)
         let end = this.maze.nodes[this.maze.nodes.length - 1]
         let pos = this.nodePos
-        // path
-        this.ctx.strokeStyle = this.solved ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)'
-        this.ctx.beginPath()
-        this.ctx.moveTo(first.x, first.y)
-        this.path.forEach(p => {
-          let n = $coords({ x: p[0], y: p[1] }, p[2], true)
-          this.ctx.lineTo(n.x, n.y)
-        })
-        this.ctx.stroke()
+        drawPath(start, this.path, this.solved ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)')
         // sol
         if (this.sol){
-          this.ctx.strokeStyle = 'rgba(0, 200, 0, 1)'
-          this.ctx.beginPath()
-          this.ctx.moveTo(first.x, first.y)
-          this.sol.forEach(p => {
-            let n = $coords(p, p.z, true)
-            this.ctx.lineTo(n.x, n.y)
-          })
-          this.ctx.stroke()
+          drawPath(start, this.sol, 'rgba(0, 200, 0, 1)')
         }
 
         // dots
         dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
         dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
-        dot($coords({ x: pos[0], y: pos[1] }, pos[2], true), 'white')
+        dot($coords(pos, pos.z, true), 'white')
       }
 
       const drawFlat = () => {
@@ -422,7 +424,7 @@ export default {
           if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
           let first = $coords(l.first)
           let second = $coords(l.second)
-          drawWall(first, second, 1)
+          // drawWall(first, second, 1)
         })
         this.mazeLinks.forEach(l => {
           if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
