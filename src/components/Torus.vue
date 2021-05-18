@@ -1,6 +1,6 @@
 <template lang="pug">
 .wrap
-  .container
+  .controls
     .section
       .columns
         .column
@@ -32,28 +32,32 @@
     v-drag="onDrag",
     @wheel.passive="onWheel"
   )
-    canvas(ref="canvas", :width="width", :height="height")
+    Resizer(@resize="resizeCanvas")
+      canvas(ref="canvas", :style="{ transform: `scale(${1/pixelRatio})`, transformOrigin: 'top left' }")
 </template>
 
 <script>
-import _sample from 'lodash/sample'
 import _isEqual from 'lodash/isEqual'
 import _findIndex from 'lodash/findIndex'
+import Resizer from '@/components/Resizer'
 import { scaleLinear, scaleLog } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
 import { torusGrid, addConfoundingLoops, depthFirst, findSolution } from '@/maze/maze'
 
-
-const centerOpacityForDensity = scaleLog().domain([100, 10])
+const wallHSL = '60deg, 38%, 42%'
+const solutionColor = 'rgb(0, 200, 0)'
+const pathColor = 'rgb(62, 66, 230)'
+const centerOpacityForDensity = scaleLog().domain([200, .1])
+const wallScale = scaleLinear().domain([100, 10]).range([1, 2])
 
 function shortestAngle(a, old){
-  let d = a - old
+  let d = (a - old) % (Math.PI * 2)
   if (d > Math.PI){
     return d - Math.PI * 2 + old
   } else if (d < -Math.PI){
     return d + Math.PI * 2 + old
   } else {
-    return a
+    return d + old
   }
 }
 
@@ -66,37 +70,24 @@ function drawCircle(ctx, x, y, r, color) {
   ctx.fill()
 }
 
-function drawLine(ctx, p1, p2, color = 'grey', lineWidth = 2) {
-  if (color !== ctx.strokeStyle) {
-    ctx.strokeStyle = color
-  }
-  ctx.lineWidth = lineWidth
-  ctx.beginPath()
-  ctx.moveTo(p1.x, p1.y)
-  ctx.lineTo(p2.x, p2.y)
-  ctx.stroke()
-}
-
 export default {
   name: 'Torus'
   , props: {
-    width: {
-      type: Number
-      , default: 1600
-    }
-    , height: {
-      type: Number
-      , default: 900
-    }
+  }
+  , components: {
+    Resizer
   }
   , data: () => ({
-    mazeW: 20
+    width: 500
+    , height: 500
+    , pixelRatio: window.devicePixelRatio || 1
+    , mazeW: 20
     , mazeD: 3
     , center: [0, 0]
     , angle: Math.PI / 2
     , skew: 1
     , zoomExp: 0
-    , minR: 3
+    , minR: 1
     , nodeIndex: [-1, 0]
     , nodePos: [0, 0, 0]
     , maze: null
@@ -180,7 +171,7 @@ export default {
   , computed: {
     iterations(){
       let r = 2 * this.minR / this.width
-      let its = Math.ceil(1.5 * Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
+      let its = Math.ceil(1 * Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
       return Math.max(its, 6)
     }
     , node(){
@@ -193,9 +184,18 @@ export default {
     , centerOpacity(){
       return centerOpacityForDensity(this.mazeW)
     }
+    , wallWidth(){
+      return wallScale(this.mazeW) * this.pixelRatio
+    }
   }
   , methods: {
-    move(index){
+    resizeCanvas({ width, height }){
+      const canvas = this.$refs.canvas
+      const r = this.pixelRatio
+      this.width = canvas.width = r * width
+      this.height = canvas.height = r * height
+    }
+    , move(index){
       if (!this.node){ return false }
       let z = this.nodeIndex[1]
 
@@ -296,13 +296,18 @@ export default {
     , draw(){
       if (!this.maze){ return }
       const ctx = this.ctx
-      ctx.clearRect(0, 0, this.width, this.height)
+      const { width, height } = this
+      ctx.clearRect(0, 0, width, height)
 
       const $x = this.smooth.$x
       const $y = this.smooth.$y
       const $xTrue = this.smooth.$xTrue
       const $yTrue = this.smooth.$yTrue
       const da = Math.PI * 2 / this.maze.width
+
+      const isInCanvas = ({ x, y }, fudge = 0) => {
+        return (x >= -fudge && x <= width + fudge) && (y >= -fudge && y <= height + fudge)
+      }
 
       const $coords = (n, z = 0, real = false) => {
         let p = this.maze.toNormalized(n.x, n.y)
@@ -323,7 +328,7 @@ export default {
       }
 
       const dot = ({x, y}, color = 'grey') => {
-        drawCircle(ctx, x, y, 5, color)
+        drawCircle(ctx, x, y, 5 * this.pixelRatio, color)
       }
 
       const arcBetween = (first, second, real = false) => {
@@ -337,7 +342,8 @@ export default {
         // convert to cartesian
         let x = (r * Math.cos(a) + 1) / 2
         let y = (r * Math.sin(a) + 1) / 2
-        let arcR = ($sy(first.r) - $sy(0)) / 2
+        let arcR = ($sy(first.r) - $sy(0)) / 2.01
+        if (arcR < 2){ return }
         ctx.arcTo($sx(x), $sy(y), second.x, second.y, arcR)
       }
 
@@ -362,19 +368,21 @@ export default {
         ctx.stroke()
       }
 
+      const wallWidth = this.wallWidth
       const co = this.centerOpacity
       // create maze
-      const draw = (nLayers) => {
-        const [cx, cy] = [this.width / 2 + this.center[0], this.height / 2 + this.center[1]]
+      const drawWalls = (nLayers) => {
+        const [cx, cy] = [width / 2 + this.center[0], height / 2 + this.center[1]]
         let radGrad = ctx.createRadialGradient(
           cx, cy, 1,
-          cx, cy, this.width / 3
+          cx, cy, width / 4
         )
-        radGrad.addColorStop(0, `rgba(200, 200, 0, ${co})`)
-        radGrad.addColorStop(1, 'rgba(200, 200, 0, 1)')
+        radGrad.addColorStop(0, `hsl(${wallHSL}, ${co})`)
+        radGrad.addColorStop(1, `hsl(${wallHSL}, 1)`)
         ctx.strokeStyle = radGrad
 
-        ctx.lineWidth = 1
+        ctx.lineWidth = wallWidth
+        ctx.lineCap = 'square'
         // ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
         ctx.beginPath()
         this.mazeWalls.forEach(l => {
@@ -382,60 +390,52 @@ export default {
           for (let n = -2; n < nLayers; n++){
             let first = $coords(l.first, n + m)
             let second = $coords(l.second, n)
-            // let z = (Math.min(first.r, second.r) * o - 0.01)
-            // drawWall(first, second, Math.sqrt(Math.max(z, 0)))
-            ctx.moveTo(first.x, first.y)
-            if (l.first.y === l.second.y){
-              arcBetween(first, second)
-            } else {
-              ctx.lineTo(second.x, second.y)
+            if (isInCanvas(first, 200) || isInCanvas(second, 200)){
+              // let z = (Math.min(first.r, second.r) * o - 0.01)
+              // drawWall(first, second, Math.sqrt(Math.max(z, 0)))
+              ctx.moveTo(first.x, first.y)
+              if (l.first.y === l.second.y){
+                arcBetween(first, second)
+              } else {
+                ctx.lineTo(second.x, second.y)
+              }
             }
           }
         })
         ctx.stroke()
-        // this.mazeLinks.forEach(l => {
-        //   let m = isBridge(l) ? 1 : 0
-        //   for (let n = 0; n < nLayers; n++){
-        //     let first = $coords(l.first, n + m)
-        //     let second = $coords(l.second, n)
-        //     let z = (Math.min(first.r, second.r) * o - 0.01)
-        //     drawPath(first, second, Math.sqrt(Math.max(z, 0)))
-        //   }
-        // })
-
-        let start = this.maze.nodes[0]
-        let end = this.maze.nodes[this.maze.nodes.length - 1]
-        let pos = this.nodePos
-        drawPath(start, this.path, this.solved ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)')
-        // sol
-        if (this.sol){
-          drawPath(start, this.sol, 'rgba(0, 200, 0, 1)')
-        }
-
-        // dots
-        dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
-        dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
-        dot($coords(pos, pos.z, true), 'white')
       }
 
-      const drawFlat = () => {
-        const $coords = ({ x, y }) => ({ x: $xTrue(x), y: $yTrue(y) })
-        this.mazeWalls.forEach(l => {
-          if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
-          let first = $coords(l.first)
-          let second = $coords(l.second)
-          // drawWall(first, second, 1)
-        })
-        this.mazeLinks.forEach(l => {
-          if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
-          let first = $coords(l.first)
-          let second = $coords(l.second)
-          drawPath(first, second, 1)
-        })
+      // const drawFlat = () => {
+      //   const $coords = ({ x, y }) => ({ x: $xTrue(x), y: $yTrue(y) })
+      //   this.mazeWalls.forEach(l => {
+      //     if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
+      //     let first = $coords(l.first)
+      //     let second = $coords(l.second)
+      //     // drawWall(first, second, 1)
+      //   })
+      //   this.mazeLinks.forEach(l => {
+      //     if (isBridge(l) || Math.abs(l.first.x - l.second.x) > 1){ return }
+      //     let first = $coords(l.first)
+      //     let second = $coords(l.second)
+      //     drawPath(first, second, 1)
+      //   })
+      // }
+
+      drawWalls(this.iterations)
+
+      let start = this.maze.nodes[0]
+      let end = this.maze.nodes[this.maze.nodes.length - 1]
+      let pos = this.nodePos
+      drawPath(start, this.path, this.solved ? solutionColor : pathColor)
+      // sol
+      if (this.sol){
+        drawPath(start, this.sol, solutionColor)
       }
 
-      draw(this.iterations)
-      // drawFlat()
+      // dots
+      dot($coords(start, start.z, true), 'rgba(0, 200, 0, 1)')
+      dot($coords(end, end.z, true), 'rgba(200, 0, 0, 1)')
+      dot($coords(pos, pos.z, true), 'white')
     }
     , solve(){
       this.sol = Object.freeze(this.maze.solution)
@@ -445,11 +445,18 @@ export default {
 </script>
 
 <style lang="sass" scoped>
+.controls
+  position: absolute
+  top: 0
+  left: 0
+  right: 0
+  background: rgba(0, 0, 0, 0.5)
+  z-index: 10
 .maze
-  display: flex
-  justify-content: center
-canvas
-  margin: 1rem
-  outline: 1px solid #333
-  // background: white
+  position: absolute
+  top: 0
+  left: 0
+  right: 0
+  bottom: 0
+  background: #1a2629
 </style>
