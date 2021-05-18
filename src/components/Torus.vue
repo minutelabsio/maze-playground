@@ -172,7 +172,7 @@ export default {
     iterations(){
       let r = 2 * this.minR / this.width
       let its = Math.ceil(1 * Math.log(r) / Math.log(1 - Math.PI * 2 / this.mazeW) / this.mazeD)
-      return Math.max(its, 6)
+      return its + 1
     }
     , node(){
       if (!this.maze){ return }
