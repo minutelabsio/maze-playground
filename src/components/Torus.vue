@@ -1,35 +1,33 @@
 <template lang="pug">
 .wrap
-  .controls
+  FloatingPanel.controls(direction="up", size="is-large", :close-on-click="false")
     .section
-      .columns
-        .column
-          b-field(grouped)
-            b-field
-              b-button.btn-dark(@click="resetPosition") Reset Position
-            b-field
-              b-button.btn-dark(@click="makeMaze") Remake
-            //- b-field
-            //-   b-button.btn-dark(@click="changePerspective") Change perspective
-            b-field
-              b-button.btn-dark(type="is-primary", @click="solve") Show Solution
-          b-field(grouped)
-            b-field(label="Follow Zoom")
-              b-switch(v-model="followZoom")
-        .column
-          b-field(label="Spokes")
-            b-slider(:min="10", :max="100", :step="1" v-model="mazeW")
-          b-field(label="Recursion Levels")
-            b-slider(:min="3", :max="50", :step="1" v-model="mazeD")
-          //- b-field(label="Difficulty")
-          //-   b-select(v-model="difficulty")
-          //-     option(value="easy") Easy
-          //-     option(value="medium") Medium
-          //-     option(value="hard") Hard
+      b-field(grouped)
+        b-field
+          p.control
+            b-button.btn-dark(@click="resetPosition", icon-right="restart", size="is-large")
+          p.control
+            b-button.btn-dark(@click="makeMaze", icon-right="shuffle-variant", size="is-large")
+          p.control
+            b-button.btn-dark(@click="solve", icon-right="eye", size="is-large")
+
+        b-field(label="Follow Zoom")
+          b-switch(v-model="followZoom")
+
+      b-field(label="Spokes")
+        b-slider(:min="10", :max="100", :step="1" v-model="mazeW")
+      b-field(label="Recursion Levels")
+        b-slider(:min="3", :max="mazeW - 1", :step="1" v-model="mazeD")
+      //- b-field(label="Difficulty")
+      //-   b-select(v-model="difficulty")
+      //-     option(value="easy") Easy
+      //-     option(value="medium") Medium
+      //-     option(value="hard") Hard
   .maze(
     ref="maze",
     tabindex="0",
     v-drag="onDrag",
+    @touchstart="onTap",
     @wheel.passive="onWheel"
   )
     Resizer(@resize="resizeCanvas")
@@ -37,10 +35,12 @@
 </template>
 
 <script>
+// import Hammer from 'hammerjs'
 import _sampleSize from 'lodash/sampleSize'
 import _isEqual from 'lodash/isEqual'
 import _findIndex from 'lodash/findIndex'
 import Resizer from '@/components/Resizer'
+import FloatingPanel from '@/components/FloatingPanel'
 import { scaleLinear, scaleLog } from 'd3-scale'
 import { smoother } from '@/lib/smoother'
 import { torusGrid, addConfoundingLoops, depthFirst, findSolution } from '@/maze/maze'
@@ -97,6 +97,7 @@ export default {
   }
   , components: {
     Resizer
+    , FloatingPanel
   }
   , data: () => ({
     width: 500
@@ -104,7 +105,7 @@ export default {
     , pixelRatio: window.devicePixelRatio || 1
     , mazeW: 20
     , mazeD: 3
-    , center: [0, 0]
+    , center: [0, -0.1]
     , angle: Math.PI / 2
     , skew: 1
     , zoomExp: 0
@@ -139,14 +140,14 @@ export default {
 
       let half = Math.min(this.width, this.height) / 2
       let hw = this.width / 2
-      let ox = this.center[0] + hw
+      let ox = 2 * hw * this.center[0] + hw
       let dx = skew * smooth.zoom * half
       smooth.$x = $x.range([ox - dx, ox + dx])
       let dxTrue = skew * smooth.zoomTrue * half
       smooth.$xTrue = $xTrue.range([ox - dxTrue, ox + dxTrue])
 
       let hh = this.height / 2
-      let oy = this.center[1] + hh
+      let oy = 2 * hh * this.center[1] + hh
       let dy = smooth.zoom * half
       smooth.$y = $y.range([oy - dy, oy + dy])
       let dyTrue = smooth.zoomTrue * half
@@ -180,8 +181,11 @@ export default {
 
     window.addEventListener('keydown', onKey)
 
+    // const hammer = Hammer(this.$refs.maze)
+
     this.$on('hook:beforeDestroy', () => {
       this.smooth.$destroy()
+      // hammer.destroy()
       window.removeEventListener('keydown', onKey)
     })
   }
@@ -255,6 +259,21 @@ export default {
     }
     , onWheel(e){
       this.zoomExp -= e.deltaY / 1000
+    }
+    , onTap(e){
+      const w = window.innerWidth
+      const h = window.innerHeight
+      const { pageX, pageY } = e.changedTouches[0]
+      if (pageX < w / 4){
+        this.move(0)
+      } else if (pageX > 3 * w / 4){
+        this.move(2)
+      } else if (pageY < h / 4){
+        this.move(1)
+      } else if (pageY > 3 * h / 4){
+        this.move(3)
+      }
+      // console.log(e)
     }
     , onDrag({ first, last, deltaX, deltaY }){
       if (last){ this.dragging = false }
@@ -417,7 +436,7 @@ export default {
       const co = this.centerOpacity
       // create maze
       const drawWalls = (nLayers) => {
-        const [cx, cy] = [width / 2 + this.center[0], height / 2 + this.center[1]]
+        const [cx, cy] = [width * (0.5 + this.center[0]), height * (0.5 + this.center[1])]
         let radGrad = ctx.createRadialGradient(
           cx, cy, 1,
           cx, cy, width / 4
@@ -456,7 +475,7 @@ export default {
         let hw = img.width / 2
         let hh = img.height / 2
         let r = $xTrue(p.r * da / 2) - $xTrue(0)
-        if (!hw || r < 6 || !isInCanvas(p)){ return }
+        if (!hw || r < 6 || !isInCanvas(p, hw + hh)){ return }
         let a = p.alpha - Math.PI / 2 + angle
         const scale = 0.7 * (r) / img.height
         ctx.shadowBlur = 4 * this.pixelRatio
@@ -514,11 +533,13 @@ export default {
 <style lang="sass" scoped>
 .controls
   position: absolute
-  top: 0
-  left: 0
-  right: 0
-  background: rgba(0, 0, 0, 0.5)
+  bottom: 0
+  left: 50%
   z-index: 10
+  background: rgba(0, 0, 0, 0.7)
+  border: 1px solid $blue
+  border-radius: 3px 3px 0 0
+  margin-left: -1.5rem
 .maze
   position: absolute
   top: 0

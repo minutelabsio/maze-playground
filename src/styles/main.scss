@@ -211,6 +211,21 @@ a:hover {
   margin: 0
 }
 
+.icon-btn {
+  @extend .clickable;
+
+  transition: color 0.15s ease;
+  color: $text;
+  text-shadow: 0 0 1px $black-ter;
+  &:hover {
+    color: $grey-lighter;
+  }
+  .active &,
+  &.active {
+    color: $primary;
+  }
+}
+
 // Icon stuff
 .icon-anim {
   transition: transform 0.3s ease-in-out;
