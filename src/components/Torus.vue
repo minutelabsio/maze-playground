@@ -265,13 +265,13 @@ export default {
       const h = window.innerHeight
       const { pageX, pageY } = e.changedTouches[0]
       if (pageX < w / 4){
-        this.move(0)
+        while(this.move(0)){ 0 }
       } else if (pageX > 3 * w / 4){
-        this.move(2)
+        while(this.move(2)){ 0 }
       } else if (pageY < h / 4){
-        this.move(1)
+        while(this.move(1)){ 0 }
       } else if (pageY > 3 * h / 4){
-        this.move(3)
+        while(this.move(3)){ 0 }
       }
       // console.log(e)
     }
