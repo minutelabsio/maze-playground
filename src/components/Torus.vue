@@ -1,5 +1,6 @@
 <template lang="pug">
 .wrap
+  b-loading(:is-full-page="true", v-model="loading")
   FloatingPanel.controls(direction="up", size="is-large", :close-on-click="false")
     .section
       b-field(grouped)
@@ -52,23 +53,26 @@ const centerOpacityForDensity = scaleLog().domain([200, .1])
 const wallScale = scaleLinear().domain([100, 10]).range([1, 2])
 
 const loadImage = (url) => {
-  let img = new Image()
-  img.src = url
-  return img
+  return new Promise((resolve, reject) => {
+    let img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = url
+  })
 }
 
-const Logo = loadImage(require('@/assets/logo-dark.png'))
+const Logo = loadImage(require('@/assets/logo-dark-min.png'))
 const Landmarks = [
-  require('@/assets/alex.png')
-  , require('@/assets/arcadi.png')
-  , require('@/assets/david.png')
-  , require('@/assets/ever.png')
-  , require('@/assets/henry.png')
-  , require('@/assets/jasper.png')
-  , require('@/assets/kate.png')
-  , require('@/assets/melissa.png')
-  , require('@/assets/peter.png')
-  , require('@/assets/sarah.png')
+  require('@/assets/alex-min.png')
+  , require('@/assets/arcadi-min.png')
+  , require('@/assets/david-min.png')
+  , require('@/assets/ever-min.png')
+  , require('@/assets/henry-min.png')
+  , require('@/assets/jasper-min.png')
+  , require('@/assets/kate-min.png')
+  , require('@/assets/melissa-min.png')
+  , require('@/assets/peter-min.png')
+  , require('@/assets/sarah-min.png')
 ].map(loadImage)
 
 function shortestAngle(a, old){
@@ -109,7 +113,7 @@ export default {
     , angle: Math.PI / 2
     , skew: 1
     , zoomExp: 0
-    , minR: 1
+    , minR: 7
     , nodeIndex: [-1, 0]
     , nodePos: [0, 0, 0]
     , maze: null
@@ -118,14 +122,17 @@ export default {
     , solved: false
     , difficulty: 'easy'
     , followZoom: true
+    , loading: true
   })
-  , mounted(){
+  , async mounted(){
     this.ctx = this.$refs.canvas.getContext('2d')
 
     const $x = scaleLinear()
     const $y = scaleLinear()
     const $xTrue = scaleLinear()
     const $yTrue = scaleLinear()
+
+    this.Landmarks = await Promise.all(Landmarks)
 
     this.smooth = smoother({
       zoomExp: { get: () => this.zoomExp, tightness : 0.05 }
@@ -180,7 +187,6 @@ export default {
     }
 
     window.addEventListener('keydown', onKey)
-
     // const hammer = Hammer(this.$refs.maze)
 
     this.$on('hook:beforeDestroy', () => {
@@ -188,6 +194,8 @@ export default {
       // hammer.destroy()
       window.removeEventListener('keydown', onKey)
     })
+
+    this.loading = false
   }
   , watch: {
     mazeW: 'makeMaze'
@@ -211,6 +219,19 @@ export default {
     }
     , wallWidth(){
       return wallScale(this.mazeW) * this.pixelRatio
+    }
+    , radialGradient(){
+      const co = this.centerOpacity
+      const width = this.width
+      const height = this.height
+      const [cx, cy] = [width * (0.5 + this.center[0]), height * (0.5 + this.center[1])]
+      let radGrad = this.ctx.createRadialGradient(
+        cx, cy, 1,
+        cx, cy, width / 4
+      )
+      radGrad.addColorStop(0, `hsl(${wallHSL}, ${co})`)
+      radGrad.addColorStop(1, `hsl(${wallHSL}, 1)`)
+      return radGrad
     }
   }
   , methods: {
@@ -333,12 +354,13 @@ export default {
       this.path = []
       this.resetPosition()
       this.sol = false
+      console.log('will draw ', this.mazeWalls.length * this.iterations)
     }
     , makeLandmarks(){
       const locations = this.maze.nodes.filter(n => n.links.length === 1)
-      const nLandmarks = Math.min(Landmarks.length, locations.length)
+      const nLandmarks = Math.min(this.Landmarks.length, locations.length)
       const deadEnds = _sampleSize(locations, nLandmarks)
-      this.landmarks = _sampleSize(Landmarks, nLandmarks).map((img, i) => {
+      this.landmarks = _sampleSize(this.Landmarks, nLandmarks).map((img, i) => {
         const n = deadEnds[i % locations.length]
         const angle = 0 // Math.PI / 2 * (_findIndex(n.neighbours, { node: n.links[0] }, 'node') + 1)
         let z = Math.ceil(Math.random() * 5) - 2
@@ -359,6 +381,7 @@ export default {
     }
     , draw(){
       if (!this.maze){ return }
+      const maze = this.maze
       const ctx = this.ctx
       const { width, height } = this
       ctx.clearRect(0, 0, width, height)
@@ -367,20 +390,25 @@ export default {
       const $y = this.smooth.$y
       const $xTrue = this.smooth.$xTrue
       const $yTrue = this.smooth.$yTrue
-      const da = Math.PI * 2 / this.maze.width
+      const da = Math.PI * 2 / maze.width
+      const sr = Math.pow(1 - da, maze.depth)
+      const Pi2 = Math.PI * 2
 
       const isInCanvas = ({ x, y }, fudge = 0) => {
         return (x >= -fudge && x <= width + fudge) && (y >= -fudge && y <= height + fudge)
       }
 
       const $coords = (n, z = 0, real = false) => {
-        let p = this.maze.toNormalized(n.x, n.y)
+        let p = maze.toNormalized(n.x, n.y)
         // let {x, y} = p
-        let alpha = p.x * Math.PI * 2 + this.smooth.angle
+        let alpha = p.x * Pi2 + this.smooth.angle
         // creates even radial grid
-        let r = Math.pow(1 - da, n.y + this.maze.depth * z)
-        let x = (r * Math.cos(alpha) + 1) / 2
-        let y = (r * Math.sin(alpha) + 1) / 2
+        if (!n._r){
+          n._r = Math.pow(1 - da, n.y)
+        }
+        let r = n._r * Math.pow(sr, z)
+        let x = (r * Math.cos(alpha) + 1) * 0.5
+        let y = (r * Math.sin(alpha) + 1) * 0.5
         return {
           x: real ? $xTrue(x) : $x(x)
           , y: real ? $yTrue(y) : $y(y)
@@ -433,24 +461,19 @@ export default {
       }
 
       const wallWidth = this.wallWidth
-      const co = this.centerOpacity
+      const radGrad = this.radialGradient
       // create maze
       const drawWalls = (nLayers) => {
-        const [cx, cy] = [width * (0.5 + this.center[0]), height * (0.5 + this.center[1])]
-        let radGrad = ctx.createRadialGradient(
-          cx, cy, 1,
-          cx, cy, width / 4
-        )
-        radGrad.addColorStop(0, `hsl(${wallHSL}, ${co})`)
-        radGrad.addColorStop(1, `hsl(${wallHSL}, 1)`)
+
         ctx.strokeStyle = radGrad
-        ctx.shadowBlur = 8 * this.pixelRatio
+        ctx.shadowBlur = 0 //8 * this.pixelRatio
         ctx.shadowColor = 'rgba(0, 0, 0, 0.8)'
         ctx.lineWidth = wallWidth
         ctx.lineCap = 'square'
         // ctx.strokeStyle = 'rgba(200, 200, 0, 1)'
         ctx.beginPath()
-        this.mazeWalls.forEach(l => {
+        for (let i = 0, nw = this.mazeWalls.length; i < nw; i++){
+          let l = this.mazeWalls[i]
           let m = isBridge(l) ? 1 : 0
           for (let n = -2; n < nLayers; n++){
             let first = $coords(l.first, n + m)
@@ -466,29 +489,31 @@ export default {
               }
             }
           }
-        })
+        }
         ctx.stroke()
       }
 
-      const drawLandmarks = () => this.landmarks.forEach(({ img, pos, z, angle }) => {
-        let p = $coords(pos, z, true)
-        let hw = img.width / 2
-        let hh = img.height / 2
-        let r = $xTrue(p.r * da / 2) - $xTrue(0)
-        if (!hw || r < 6 || !isInCanvas(p, hw + hh)){ return }
-        let a = p.alpha - Math.PI / 2 + angle
-        const scale = 0.7 * (r) / img.height
+      const drawLandmarks = () => {
         ctx.shadowBlur = 4 * this.pixelRatio
         ctx.shadowColor = 'rgba(255, 255, 255, 0.6)'
-        ctx.translate(p.x, p.y)
-        ctx.rotate(a)
-        ctx.scale(scale, scale)
-        ctx.drawImage(img, -hw, -hh)
-        ctx.scale(1 / scale, 1 / scale)
-        ctx.rotate(-a)
-        ctx.translate(-p.x, -p.y)
+        this.landmarks.forEach(({ img, pos, z, angle }) => {
+          let p = $coords(pos, z, true)
+          let hw = img.width / 2
+          let hh = img.height / 2
+          let r = $xTrue(p.r * da / 2) - $xTrue(0)
+          if (!hw || r < 6 || !isInCanvas(p, hw + hh)){ return }
+          let a = p.alpha - Math.PI / 2 + angle
+          const scale = 0.7 * (r) / img.height
+          ctx.translate(p.x, p.y)
+          ctx.rotate(a)
+          // ctx.scale(scale, scale)
+          ctx.drawImage(img, -hw * scale, -hh * scale, img.width * scale, img.height * scale)
+          // ctx.scale(1 / scale, 1 / scale)
+          ctx.rotate(-a)
+          ctx.translate(-p.x, -p.y)
+        })
         ctx.shadowBlur = 0
-      })
+      }
 
       // const drawFlat = () => {
       //   const $coords = ({ x, y }) => ({ x: $xTrue(x), y: $yTrue(y) })
@@ -509,8 +534,8 @@ export default {
       drawWalls(this.iterations)
       drawLandmarks()
 
-      let start = this.maze.nodes[0]
-      let end = this.maze.nodes[this.maze.nodes.length - 1]
+      let start = maze.nodes[0]
+      let end = maze.nodes[maze.nodes.length - 1]
       let pos = this.nodePos
       drawPath(start, this.path, this.solved ? solutionColor : pathColor)
       // sol

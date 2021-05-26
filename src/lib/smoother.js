@@ -3,8 +3,9 @@ import { lerp } from './utils'
 export function smoother(props, onUpdate) {
   const keys = Object.keys(props)
   const ret = {}
+  let stop = false
   const tick = () => {
-    window.requestAnimationFrame(tick)
+    if (stop){ return }
     for (let key of keys) {
       let entry = props[key]
       let get = entry.get || entry
@@ -12,10 +13,11 @@ export function smoother(props, onUpdate) {
       ret[key] = lerp(+ret[key] || 0, get(), tightness)
     }
     if (onUpdate) { onUpdate(ret) }
+    window.requestAnimationFrame(tick)
   }
 
   ret.$destroy = () => {
-    window.cancelAnimationFrame(tick)
+    stop = true
   }
 
   keys.forEach(k => {
