@@ -43,8 +43,9 @@ import _findIndex from 'lodash/findIndex'
 import Resizer from '@/components/Resizer'
 import FloatingPanel from '@/components/FloatingPanel'
 import { scaleLinear, scaleLog } from 'd3-scale'
-import { smoother } from '@/lib/smoother'
+import Easing from '@/lib/easing'
 import { torusGrid, addConfoundingLoops, depthFirst, findSolution } from '@/maze/maze'
+import { TweenBuffer } from '@/lib/tween-buffer'
 
 const wallHSL = '60deg, 38%, 42%'
 const solutionColor = 'rgb(0, 200, 0)'
@@ -134,10 +135,7 @@ export default {
 
     this.Landmarks = await Promise.all(Landmarks)
 
-    this.smooth = smoother({
-      zoomExp: { get: () => this.zoomExp, tightness : 0.05 }
-      , angle: { get: () => this.angle, tightness: 0.05 }
-    }, smooth => {
+    const onUpdate = smooth => {
       const mod = this.mod
       // let base = (this.mazeD + 1) // (Math.PI * 2)
       smooth.zoomTrue = Math.pow(2, smooth.zoomExp)
@@ -161,7 +159,40 @@ export default {
       smooth.$yTrue = $yTrue.range([oy - dyTrue, oy + dyTrue])
 
       this.draw()
+    }
+
+    this.smooth = {
+      zoomExp: this.zoomExp
+      , angle: this.angle
+    }
+
+    this.tb = new TweenBuffer(this.smooth, 800)
+      .easing(Easing.easeInOutQuad)
+    this.$watch('zoomExp', zoomExp => {
+      this.tb.to({ zoomExp, angle: this.angle })
     })
+    this.$watch('angle', angle => {
+      this.tb.to({ angle, zoomExp: this.zoomExp })
+    })
+
+    let stop = false
+    let prevT = performance.now()
+    const tick = () => {
+      if (stop){ return }
+      let time = performance.now()
+      let dt = time - prevT
+      prevT = time
+      this.tb.tick(dt)
+      onUpdate(this.tb.state)
+      window.requestAnimationFrame(tick)
+    }
+
+    tick()
+
+    // this.smooth = smoother({
+    //   zoomExp: { get: () => this.zoomExp, tightness : 0.05 }
+    //   , angle: { get: () => this.angle, tightness: 0.05 }
+    // }, onUpdate)
 
     this.makeMaze()
 
@@ -190,8 +221,9 @@ export default {
     // const hammer = Hammer(this.$refs.maze)
 
     this.$on('hook:beforeDestroy', () => {
-      this.smooth.$destroy()
+      // this.smooth.$destroy()
       // hammer.destroy()
+      stop = true
       window.removeEventListener('keydown', onKey)
     })
 
@@ -346,7 +378,7 @@ export default {
       const holes = Math.round(Math.sqrt(maze.nodes.length) / 4)
       // console.log('holes', holes)
       maze.solution = findSolution(maze.nodes)
-      addConfoundingLoops(maze, holes)
+      addConfoundingLoops(maze.solution, holes)
       this.maze = Object.freeze(maze)
       this.mazeLinks = this.maze.links()
       this.mazeWalls = this.maze.walls()

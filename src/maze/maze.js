@@ -185,9 +185,9 @@ export function findSolution(nodes, node, visited = []){
   return false
 }
 
-export function addConfoundingLoops(maze, count = 3){
-  let pairs = maze.nodes.reduce((acc, n) => {
-    if (n.links.length > 1){ return acc }
+export function addConfoundingLoops(nodes, count = 3){
+  let pairs = nodes.reduce((acc, n) => {
+    if (n.links.length > 2){ return acc }
     let pairs = n.neighbours
       .filter(g => n.z !== g.node.z)
       .map(g => [n, g.node])
